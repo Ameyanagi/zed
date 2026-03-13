@@ -38,9 +38,6 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
     fn icon(&self, window: &Window, cx: &App) -> Option<ui::IconName>;
     fn icon_tooltip(&self, window: &Window, cx: &App) -> &'static str;
     fn toggle_action(&self) -> Box<dyn Action>;
-    fn icon_label(&self, _window: &Window, _: &App) -> Option<String> {
-        None
-    }
     fn is_zoomed(&self, _window: &Window, _cx: &App) -> bool {
         false
     }
@@ -78,7 +75,6 @@ pub trait PanelHandle: Send + Sync {
     fn icon(&self, window: &Window, cx: &App) -> Option<ui::IconName>;
     fn icon_tooltip(&self, window: &Window, cx: &App) -> &'static str;
     fn toggle_action(&self, window: &Window, cx: &App) -> Box<dyn Action>;
-    fn icon_label(&self, window: &Window, cx: &App) -> Option<String>;
     fn panel_focus_handle(&self, cx: &App) -> FocusHandle;
     fn to_any(&self) -> AnyView;
     fn activation_priority(&self, cx: &App) -> u32;
@@ -166,10 +162,6 @@ where
 
     fn toggle_action(&self, _: &Window, cx: &App) -> Box<dyn Action> {
         self.read(cx).toggle_action()
-    }
-
-    fn icon_label(&self, window: &Window, cx: &App) -> Option<String> {
-        self.read(cx).icon_label(window, cx)
     }
 
     fn to_any(&self) -> AnyView {
