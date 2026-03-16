@@ -7087,7 +7087,8 @@ impl Workspace {
     ) -> bool {
         if let Some((view, drawer)) = self.drawer_mut::<T>() {
             if view.focus_handle(cx).contains_focused(window, cx) {
-                // todo! focus the center?
+                self.active_pane
+                    .update(cx, |pane, cx| window.focus(&pane.focus_handle(cx), cx));
                 false
             } else {
                 drawer.open = true;
