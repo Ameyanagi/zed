@@ -2293,7 +2293,7 @@ impl ReferenceExcerpt {
         ExcerptInfo {
             path_key_index: self.path_key_index,
             buffer_id: self.buffer.read(cx).remote_id(),
-            range: self.range.clone(),
+            range: ExcerptRange::new(self.range.clone()),
         }
     }
 }
@@ -2323,10 +2323,11 @@ impl ReferenceMultibuffer {
                 .map(|excerpt| {
                     let snapshot = excerpt.buffer.read(cx).snapshot();
                     let mut range = excerpt.range.to_point(&snapshot);
-                    if excerpts_to_expand
-                        .iter()
-                        .any(|info| excerpt.range.contains_anchor(info.range.start, &snapshot))
-                    {
+                    if excerpts_to_expand.iter().any(|info| {
+                        excerpt
+                            .range
+                            .contains_anchor(info.range.context.start, &snapshot)
+                    }) {
                         range.start = Point::new(range.start.row.saturating_sub(line_count), 0);
                         range.end = snapshot
                             .clip_point(Point::new(range.end.row + line_count, 0), Bias::Left);
@@ -2916,9 +2917,9 @@ async fn test_random_multibuffer(cx: &mut TestAppContext, mut rng: StdRng) {
                         .collect::<Vec<_>>();
                     log::info!("Expanding excerpts {excerpt_ixs:?} by {line_count} lines");
                     multibuffer.expand_excerpts(
-                        excerpts
-                            .iter()
-                            .map(|info| Anchor::in_buffer(info.path_key_index, info.range.end)),
+                        excerpts.iter().map(|info| {
+                            Anchor::in_buffer(info.path_key_index, info.range.context.end)
+                        }),
                         line_count,
                         ExpandExcerptDirection::UpAndDown,
                         cx,
@@ -5154,8 +5155,8 @@ fn test_cannot_seek_backward_after_excerpt_replacement(cx: &mut TestAppContext) 
         let e_b2_info = excerpt_infos[1].clone();
         let e_b3_info = excerpt_infos[2].clone();
 
-        let anchor_b2 = Anchor::in_buffer(e_b2_info.path_key_index, e_b2_info.range.start);
-        let anchor_b3 = Anchor::in_buffer(e_b3_info.path_key_index, e_b3_info.range.start);
+        let anchor_b2 = Anchor::in_buffer(e_b2_info.path_key_index, e_b2_info.range.context.start);
+        let anchor_b3 = Anchor::in_buffer(e_b3_info.path_key_index, e_b3_info.range.context.start);
         (anchor_b2, anchor_b3)
     });
 

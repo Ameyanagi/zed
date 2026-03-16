@@ -230,6 +230,10 @@ impl BufferDiffSnapshot {
         buffer_diff.update(cx, |buffer_diff, cx| buffer_diff.snapshot(cx))
     }
 
+    pub fn buffer_id(&self) -> BufferId {
+        self.inner.buffer_snapshot.remote_id()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.inner.hunks.is_empty()
     }

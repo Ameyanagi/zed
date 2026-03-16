@@ -470,7 +470,7 @@ pub(crate) fn resolve_conflict(
                     })
                     .ok()?;
                 let &(_, block_id) = &state.block_ids[ix];
-                let range = snapshot.anchor_range_in_buffer(excerpt_id, resolved_conflict.range)?;
+                let range = snapshot.anchor_range_in_buffer(resolved_conflict.range)?;
 
                 editor.remove_gutter_highlights::<ConflictsOuter>(vec![range.clone()], cx);
 

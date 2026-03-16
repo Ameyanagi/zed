@@ -354,6 +354,7 @@ impl Anchor {
         }
     }
 
+    #[deprecated(note = "FIXME check if callers should be using the buffer_anchor_to_anchor")]
     pub fn text_anchor(&self) -> Option<text::Anchor> {
         match self {
             Anchor::Min | Anchor::Max => None,

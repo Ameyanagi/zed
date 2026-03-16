@@ -6468,7 +6468,7 @@ impl Editor {
             replace_range,
         } = process_completion_for_edit(&completion, intent, &buffer_handle, &initial_position, cx);
 
-        let buffer = buffer_handle.read(cx);
+        let buffer = buffer_handle.read(cx).snapshot();
         let newest_selection = self.selections.newest_anchor();
 
         let Some(replace_range_multibuffer) =
@@ -6493,7 +6493,7 @@ impl Editor {
         let lookahead = replace_range
             .end
             .to_offset(&buffer_snapshot)
-            .saturating_sub(newest_range_buffer.end.to_offset(buffer));
+            .saturating_sub(newest_range_buffer.end.to_offset(&buffer));
         let prefix = &old_text[..old_text.len().saturating_sub(lookahead)];
         let suffix = &old_text[lookbehind.min(old_text.len())..];
 
@@ -17419,16 +17419,19 @@ impl Editor {
         };
 
         let snapshot = self.buffer.read(cx).snapshot(cx);
-        let excerpt_ids = selections
+        let excerpt_anchors = selections
             .iter()
-            .flat_map(|selection| snapshot.excerpt_ids_for_range(selection.range()))
-            .unique()
-            .sorted()
+            .flat_map(|selection| {
+                snapshot
+                    .range_to_buffer_ranges(selection.range())
+                    .into_iter()
+                    .map(|(excerpt, _)| excerpt.start_anchor())
+            })
             .collect::<Vec<_>>();
 
         if self.delegate_expand_excerpts {
             cx.emit(EditorEvent::ExpandExcerptsRequested {
-                excerpt_anchors: excerpt_ids,
+                excerpt_anchors,
                 lines,
                 direction,
             });
@@ -17436,7 +17439,7 @@ impl Editor {
         }
 
         self.buffer.update(cx, |buffer, cx| {
-            buffer.expand_excerpts(excerpt_ids, lines, direction, cx)
+            buffer.expand_excerpts(excerpt_anchors, lines, direction, cx)
         })
     }
 
@@ -20544,7 +20547,7 @@ impl Editor {
         buffer: &'a MultiBufferSnapshot,
     ) -> impl 'a + Iterator<Item = MultiBufferDiffHunk> {
         ranges.iter().flat_map(move |range| {
-            let end_excerpt_id = range.end.excerpt_id;
+            let end_excerpt = buffer.excerpt_for_position(range.end);
             let range = range.to_point(buffer);
             let mut peek_end = range.end;
             if range.end.row < buffer.max_row().0 {
@@ -20552,7 +20555,19 @@ impl Editor {
             }
             buffer
                 .diff_hunks_in_range(range.start..peek_end)
-                .filter(move |hunk| hunk.excerpt_id.cmp(&end_excerpt_id, buffer).is_le())
+                .filter_map(move |hunk| {
+                    if hunk
+                        .excerpt_info
+                        .multibuffer_range()
+                        .end
+                        .cmp(&end_excerpt?.end_anchor(), buffer)
+                        .is_le()
+                    {
+                        Some(hunk)
+                    } else {
+                        None
+                    }
+                })
         })
     }
 
@@ -24410,7 +24425,7 @@ impl Editor {
                         .snapshot(cx)
                         .range_to_buffer_ranges_with_deleted_hunks(selection.range())
                     {
-                        if let Some(text_anchor) = anchor.map(|anchor| anchor.text_anchor()) {
+                        if let Some(text_anchor) = anchor.and_then(|anchor| anchor.text_anchor()) {
                             let Some(buffer_handle) = multi_buffer.buffer(text_anchor.buffer_id)
                             else {
                                 continue;
@@ -24565,7 +24580,7 @@ impl Editor {
                             };
                             let nav_history = editor.nav_history.take();
                             let multibuffer_snapshot = editor.buffer().read(cx).snapshot(cx);
-                            let Some(excerpt) = multibuffer_snapshot.as_singleton() else {
+                            let Some(buffer_snapshot) = multibuffer_snapshot.as_singleton() else {
                                 return;
                             };
                             editor.change_selections(
@@ -24574,10 +24589,11 @@ impl Editor {
                                 cx,
                                 |s| {
                                     s.select_ranges(ranges.into_iter().map(|range| {
-                                        let range =
-                                            excerpt.buffer_snapshot().anchor_before(range.start)
-                                                ..excerpt.buffer_snapshot().anchor_after(range.end);
-                                        excerpt.anchor_range(range)
+                                        let range = buffer_snapshot.anchor_before(range.start)
+                                            ..buffer_snapshot.anchor_after(range.end);
+                                        multibuffer_snapshot
+                                            .buffer_anchor_range_to_anchor_range(range)
+                                            .unwrap()
                                     }));
                                 },
                             );

@@ -69,7 +69,7 @@ impl MultiBuffer {
         let excerpt = snapshot.excerpts_for_path(path).next()?;
         Some(Anchor::in_buffer(
             excerpt.path_key_index,
-            excerpt.range.start,
+            excerpt.range.context.start,
         ))
     }
 

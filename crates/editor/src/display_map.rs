@@ -191,10 +191,9 @@ pub struct CompanionExcerptPatch {
 }
 
 pub type ConvertMultiBufferRows = fn(
-    &HashMap<ExcerptId, ExcerptId>,
     &MultiBufferSnapshot,
     &MultiBufferSnapshot,
-    (Bound<MultiBufferPoint>, Bound<MultiBufferPoint>),
+    Range<MultiBufferPoint>,
 ) -> Vec<CompanionExcerptPatch>;
 
 /// Decides how text in a [`MultiBuffer`] should be displayed in a buffer, handling inlay hints,
@@ -236,8 +235,6 @@ pub(crate) struct Companion {
     rhs_display_map_id: EntityId,
     rhs_buffer_to_lhs_buffer: HashMap<BufferId, BufferId>,
     lhs_buffer_to_rhs_buffer: HashMap<BufferId, BufferId>,
-    rhs_excerpt_to_lhs_excerpt: HashMap<ExcerptId, ExcerptId>,
-    lhs_excerpt_to_rhs_excerpt: HashMap<ExcerptId, ExcerptId>,
     rhs_rows_to_lhs_rows: ConvertMultiBufferRows,
     lhs_rows_to_rhs_rows: ConvertMultiBufferRows,
     rhs_custom_block_to_balancing_block: RefCell<HashMap<CustomBlockId, CustomBlockId>>,
@@ -254,8 +251,6 @@ impl Companion {
             rhs_display_map_id,
             rhs_buffer_to_lhs_buffer: Default::default(),
             lhs_buffer_to_rhs_buffer: Default::default(),
-            rhs_excerpt_to_lhs_excerpt: Default::default(),
-            lhs_excerpt_to_rhs_excerpt: Default::default(),
             rhs_rows_to_lhs_rows,
             lhs_rows_to_rhs_rows,
             rhs_custom_block_to_balancing_block: Default::default(),
@@ -283,14 +278,14 @@ impl Companion {
         display_map_id: EntityId,
         companion_snapshot: &MultiBufferSnapshot,
         our_snapshot: &MultiBufferSnapshot,
-        bounds: (Bound<MultiBufferPoint>, Bound<MultiBufferPoint>),
+        bounds: Range<MultiBufferPoint>,
     ) -> Vec<CompanionExcerptPatch> {
-        let (excerpt_map, convert_fn) = if self.is_rhs(display_map_id) {
-            (&self.rhs_excerpt_to_lhs_excerpt, self.rhs_rows_to_lhs_rows)
+        let convert_fn = if self.is_rhs(display_map_id) {
+            self.rhs_rows_to_lhs_rows
         } else {
-            (&self.lhs_excerpt_to_rhs_excerpt, self.lhs_rows_to_rhs_rows)
+            self.lhs_rows_to_rhs_rows
         };
-        convert_fn(excerpt_map, companion_snapshot, our_snapshot, bounds)
+        convert_fn(companion_snapshot, our_snapshot, bounds)
     }
 
     pub(crate) fn convert_point_from_companion(
@@ -300,20 +295,15 @@ impl Companion {
         companion_snapshot: &MultiBufferSnapshot,
         point: MultiBufferPoint,
     ) -> Range<MultiBufferPoint> {
-        let (excerpt_map, convert_fn) = if self.is_rhs(display_map_id) {
-            (&self.lhs_excerpt_to_rhs_excerpt, self.lhs_rows_to_rhs_rows)
+        let convert_fn = if self.is_rhs(display_map_id) {
+            self.lhs_rows_to_rhs_rows
         } else {
-            (&self.rhs_excerpt_to_lhs_excerpt, self.rhs_rows_to_lhs_rows)
+            self.rhs_rows_to_lhs_rows
         };
 
-        let excerpt = convert_fn(
-            excerpt_map,
-            our_snapshot,
-            companion_snapshot,
-            (Bound::Included(point), Bound::Included(point)),
-        )
-        .into_iter()
-        .next();
+        let excerpt = convert_fn(our_snapshot, companion_snapshot, point..point)
+            .into_iter()
+            .next();
 
         let Some(excerpt) = excerpt else {
             return Point::zero()..our_snapshot.max_point();
@@ -328,20 +318,15 @@ impl Companion {
         companion_snapshot: &MultiBufferSnapshot,
         point: MultiBufferPoint,
     ) -> Range<MultiBufferPoint> {
-        let (excerpt_map, convert_fn) = if self.is_rhs(display_map_id) {
-            (&self.rhs_excerpt_to_lhs_excerpt, self.rhs_rows_to_lhs_rows)
+        let convert_fn = if self.is_rhs(display_map_id) {
+            self.rhs_rows_to_lhs_rows
         } else {
-            (&self.lhs_excerpt_to_rhs_excerpt, self.lhs_rows_to_rhs_rows)
+            self.lhs_rows_to_rhs_rows
         };
 
-        let excerpt = convert_fn(
-            excerpt_map,
-            companion_snapshot,
-            our_snapshot,
-            (Bound::Included(point), Bound::Included(point)),
-        )
-        .into_iter()
-        .next();
+        let excerpt = convert_fn(companion_snapshot, our_snapshot, point..point)
+            .into_iter()
+            .next();
 
         let Some(excerpt) = excerpt else {
             return Point::zero()..companion_snapshot.max_point();
@@ -349,53 +334,11 @@ impl Companion {
         excerpt.patch.edit_for_old_position(point).new
     }
 
-    pub(crate) fn companion_excerpt_to_excerpt(
-        &self,
-        display_map_id: EntityId,
-    ) -> &HashMap<ExcerptId, ExcerptId> {
-        if self.is_rhs(display_map_id) {
-            &self.lhs_excerpt_to_rhs_excerpt
-        } else {
-            &self.rhs_excerpt_to_lhs_excerpt
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn excerpt_mappings(
-        &self,
-    ) -> (
-        &HashMap<ExcerptId, ExcerptId>,
-        &HashMap<ExcerptId, ExcerptId>,
-    ) {
-        (
-            &self.lhs_excerpt_to_rhs_excerpt,
-            &self.rhs_excerpt_to_lhs_excerpt,
-        )
-    }
-
     fn buffer_to_companion_buffer(&self, display_map_id: EntityId) -> &HashMap<BufferId, BufferId> {
         if self.is_rhs(display_map_id) {
             &self.rhs_buffer_to_lhs_buffer
         } else {
             &self.lhs_buffer_to_rhs_buffer
-        }
-    }
-
-    pub(crate) fn add_excerpt_mapping(&mut self, lhs_id: ExcerptId, rhs_id: ExcerptId) {
-        self.lhs_excerpt_to_rhs_excerpt.insert(lhs_id, rhs_id);
-        self.rhs_excerpt_to_lhs_excerpt.insert(rhs_id, lhs_id);
-    }
-
-    pub(crate) fn remove_excerpt_mappings(
-        &mut self,
-        lhs_ids: impl IntoIterator<Item = ExcerptId>,
-        rhs_ids: impl IntoIterator<Item = ExcerptId>,
-    ) {
-        for id in lhs_ids {
-            self.lhs_excerpt_to_rhs_excerpt.remove(&id);
-        }
-        for id in rhs_ids {
-            self.rhs_excerpt_to_lhs_excerpt.remove(&id);
         }
     }
 
@@ -626,18 +569,6 @@ impl DisplayMap {
 
     pub(crate) fn companion(&self) -> Option<&Entity<Companion>> {
         self.companion.as_ref().map(|(_, c)| c)
-    }
-
-    pub(crate) fn companion_excerpt_to_my_excerpt(
-        &self,
-        their_id: ExcerptId,
-        cx: &App,
-    ) -> Option<ExcerptId> {
-        let (_, companion) = self.companion.as_ref()?;
-        let c = companion.read(cx);
-        c.companion_excerpt_to_excerpt(self.entity_id)
-            .get(&their_id)
-            .copied()
     }
 
     fn sync_through_wrap(&mut self, cx: &mut App) -> (WrapSnapshot, WrapPatch) {

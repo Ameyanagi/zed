@@ -1246,11 +1246,16 @@ impl BlockMap {
         let our_buffer = wrap_snapshot.buffer_snapshot();
         let companion_buffer = companion_snapshot.buffer_snapshot();
 
+        let range = match bounds {
+            (Bound::Included(start), Bound::Excluded(end)) => start..end,
+            (Bound::Included(start), Bound::Unbounded) => start..wrap_snapshot.buffer().max_point(),
+            _ => unreachable!(),
+        };
         let patches = companion.convert_rows_to_companion(
             display_map_id,
             companion_buffer,
             our_buffer,
-            bounds,
+            range,
         );
 
         let mut our_inlay_point_cursor = wrap_snapshot.inlay_point_cursor();
@@ -2265,9 +2270,15 @@ impl BlockSnapshot {
                 let start_point = start_anchor.to_point(&buffer);
                 self.wrap_snapshot.make_wrap_point(start_point, Bias::Left)
             }
-            BlockId::FoldedBuffer(excerpt_id) => self
-                .wrap_snapshot
-                .make_wrap_point(buffer.range_for_excerpt(excerpt_id)?.start, Bias::Left),
+            BlockId::FoldedBuffer(buffer_id) => self.wrap_snapshot.make_wrap_point(
+                buffer
+                    .excerpts_for_buffer(buffer_id)
+                    .next()?
+                    .multibuffer_range()
+                    .start
+                    .to_point(buffer),
+                Bias::Left,
+            ),
             BlockId::Spacer(_) => return None,
         };
         let wrap_row = wrap_point.row();
@@ -4632,13 +4643,6 @@ mod tests {
         let subscription =
             rhs_multibuffer.update(cx, |rhs_multibuffer, _| rhs_multibuffer.subscribe());
 
-        let lhs_start_anchor = lhs_multibuffer.read_with(cx, |mb, cx| {
-            mb.snapshot(cx).excerpts().next().unwrap().start_anchor()
-        });
-        let rhs_excerpt_id = rhs_multibuffer.read_with(cx, |mb, cx| {
-            mb.snapshot(cx).excerpts().next().unwrap().start_anchor()
-        });
-
         let lhs_buffer_snapshot = cx.update(|cx| lhs_multibuffer.read(cx).snapshot(cx));
         let (mut _lhs_inlay_map, lhs_inlay_snapshot) = InlayMap::new(lhs_buffer_snapshot);
         let (mut _lhs_fold_map, lhs_fold_snapshot) = FoldMap::new(lhs_inlay_snapshot);
@@ -4660,13 +4664,11 @@ mod tests {
         let rhs_entity_id = rhs_multibuffer.entity_id();
 
         let companion = cx.new(|_| {
-            let mut c = Companion::new(
+            Companion::new(
                 rhs_entity_id,
                 convert_rhs_rows_to_lhs,
                 convert_lhs_rows_to_rhs,
-            );
-            c.add_excerpt_mapping(lhs_start_anchor, rhs_excerpt_id);
-            c
+            )
         });
 
         let rhs_edits = Patch::new(vec![text::Edit {
