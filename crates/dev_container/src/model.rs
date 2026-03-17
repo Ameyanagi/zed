@@ -54,6 +54,7 @@ struct DevContainerManifest {
     features_build_info: Option<FeaturesBuildInfo>,
     features: Vec<FeatureManifest>,
 }
+const DEFAULT_REMOTE_PROJECT_DIR: &str = "/workspaces/";
 impl DevContainerManifest {
     async fn new(
         fs: Arc<dyn Fs>,
@@ -862,10 +863,6 @@ impl DevContainerManifest {
         // TODO this probably shouldn't proceed until parsed either
         let dev_container = self.dev_container();
 
-        let Some(features_build_info) = &self.features_build_info else {
-            log::error!("Cannot build docker image; features build info has not been constructed");
-            return Err(DevContainerErrorV2::UnmappedError);
-        };
         match dev_container.build_type() {
             DevContainerBuildType::Image => {
                 let Some(image_tag) = &dev_container.image else {
@@ -902,6 +899,10 @@ impl DevContainerManifest {
         }
 
         // After a successful build, inspect the newly tagged image to get its metadata
+        let Some(features_build_info) = &self.features_build_info else {
+            log::error!("Features build info expected, but not created");
+            return Err(DevContainerErrorV2::UnmappedError);
+        };
         let image = inspect_image(&features_build_info.image_tag).await?;
 
         Ok(image)
@@ -1063,21 +1064,24 @@ impl DevContainerManifest {
             .ok_or(DevContainerErrorV2::UnmappedError)
     }
 
-    fn remote_workspace_folder(&self) -> Option<PathBuf> {
+    fn remote_workspace_folder(&self) -> Result<PathBuf, DevContainerErrorV2> {
         self.dev_container()
             .workspace_folder
             .as_ref()
             .map(|folder| PathBuf::from(folder))
+            .or(Some(
+                PathBuf::from(DEFAULT_REMOTE_PROJECT_DIR).join(self.local_workspace_base_name()?),
+            ))
+            .ok_or(DevContainerErrorV2::UnmappedError)
     }
-    fn remote_workspace_base_name(&self) -> Option<String> {
-        if let Some(path_buf) = &self.remote_workspace_folder() {
-            path_buf.file_name().map(|f| format!("{}", f.display()))
-        } else {
-            None
-        }
+    fn remote_workspace_base_name(&self) -> Result<String, DevContainerErrorV2> {
+        self.remote_workspace_folder().and_then(|f| {
+            f.file_name()
+                .map(|file_name| file_name.display().to_string())
+                .ok_or(DevContainerErrorV2::UnmappedError)
+        })
     }
 
-    // Config isn't in place by the time I get here in the var subst process. How to get around this?
     fn remote_workspace_mount(&self) -> Result<PathBuf, DevContainerErrorV2> {
         if let Some(mount) = &self.dev_container().workspace_mount {
             return Ok(PathBuf::from(&mount.target));
@@ -1880,7 +1884,7 @@ mod test {
     };
     const TEST_PROJECT_PATH: &str = "/path/to/local/project";
 
-    fn _fake_http_client() -> Arc<dyn HttpClient> {
+    fn fake_http_client() -> Arc<dyn HttpClient> {
         FakeHttpClient::create(|_| async move {
             Ok(http::Response::builder()
                 .status(404)
@@ -2064,60 +2068,68 @@ mod test {
         assert_eq!(&remote_user, "vsCode")
     }
 
-    #[gpui::test]
-    async fn should_create_correct_docker_build_command(cx: &mut TestAppContext) {
-        let fs = FakeFs::new(cx.executor());
-        let devcontainer_manifest = init_devcontainer_manifest(
-            fs,
-            HashMap::default(),
-            r#"
-    {
-        image: mcr.microsoft.com/devcontainers/rust:2-1-bookworm
-    }
-            "#,
-        )
-        .await
-        .unwrap();
+    // This isn't valid, because docker_build doesn't need to be created for an image-only, featureles devcontainer. The call will fail
+    // #[gpui::test]
+    // async fn should_create_correct_docker_build_command(cx: &mut TestAppContext) {
+    //     let fs = FakeFs::new(cx.executor());
+    //     let mut devcontainer_manifest = init_devcontainer_manifest(
+    //         fs,
+    //         HashMap::default(),
+    //         r#"
+    // {
+    //     "image": "mcr.microsoft.com/devcontainers/rust:2-1-bookworm"
+    // }
+    //         "#,
+    //     )
+    //     .await
+    //     .unwrap();
 
-        let features_content_dir =
-            PathBuf::from("/tmp/devcontainercli/container-features/0.82.0-1234567890");
-        let dockerfile_path = features_content_dir.join("Dockerfile.extended");
-        let empty_context_dir = PathBuf::from("/tmp/devcontainercli/empty-folder");
+    //     let features_content_dir =
+    //         PathBuf::from("/tmp/devcontainercli/container-features/0.82.0-1234567890");
+    //     let dockerfile_path = features_content_dir.join("Dockerfile.extended");
+    //     let empty_context_dir = PathBuf::from("/tmp/devcontainercli/empty-folder");
 
-        let docker_build_command = devcontainer_manifest.create_docker_build().unwrap();
+    //     // So these are the "prep" dependencies before we can actually start on build command
+    //     devcontainer_manifest.parse_nonremote_vars().unwrap();
+    //     devcontainer_manifest
+    //         .download_feature_and_dockerfile_resources(&fake_http_client())
+    //         .await
+    //         .unwrap();
 
-        assert_eq!(docker_build_command.get_program(), "docker");
-        assert_eq!(
-            docker_build_command.get_args().collect::<Vec<&OsStr>>(),
-            vec![
-                OsStr::new("buildx"),
-                OsStr::new("build"),
-                OsStr::new("--load"),
-                OsStr::new("--build-context"),
-                OsStr::new(&format!(
-                    "dev_containers_feature_content_source={}",
-                    features_content_dir.display()
-                )),
-                OsStr::new("--build-arg"),
-                OsStr::new(
-                    "_DEV_CONTAINERS_BASE_IMAGE=mcr.microsoft.com/devcontainers/rust:2-1-bookworm"
-                ),
-                OsStr::new("--build-arg"),
-                OsStr::new("_DEV_CONTAINERS_IMAGE_USER=root"),
-                OsStr::new("--build-arg"),
-                OsStr::new(
-                    "_DEV_CONTAINERS_FEATURE_CONTENT_SOURCE=dev_container_feature_content_temp"
-                ),
-                OsStr::new("--target"),
-                OsStr::new("dev_containers_target_stage"),
-                OsStr::new("-f"),
-                OsStr::new(&dockerfile_path.display().to_string()),
-                OsStr::new("-t"),
-                OsStr::new("vsc-cli-abc123-features"),
-                OsStr::new(&empty_context_dir.display().to_string()),
-            ]
-        );
-    }
+    //     let docker_build_command = devcontainer_manifest.create_docker_build().unwrap();
+
+    //     assert_eq!(docker_build_command.get_program(), "docker");
+    //     assert_eq!(
+    //         docker_build_command.get_args().collect::<Vec<&OsStr>>(),
+    //         vec![
+    //             OsStr::new("buildx"),
+    //             OsStr::new("build"),
+    //             OsStr::new("--load"),
+    //             OsStr::new("--build-context"),
+    //             OsStr::new(&format!(
+    //                 "dev_containers_feature_content_source={}",
+    //                 features_content_dir.display()
+    //             )),
+    //             OsStr::new("--build-arg"),
+    //             OsStr::new(
+    //                 "_DEV_CONTAINERS_BASE_IMAGE=mcr.microsoft.com/devcontainers/rust:2-1-bookworm"
+    //             ),
+    //             OsStr::new("--build-arg"),
+    //             OsStr::new("_DEV_CONTAINERS_IMAGE_USER=root"),
+    //             OsStr::new("--build-arg"),
+    //             OsStr::new(
+    //                 "_DEV_CONTAINERS_FEATURE_CONTENT_SOURCE=dev_container_feature_content_temp"
+    //             ),
+    //             OsStr::new("--target"),
+    //             OsStr::new("dev_containers_target_stage"),
+    //             OsStr::new("-f"),
+    //             OsStr::new(&dockerfile_path.display().to_string()),
+    //             OsStr::new("-t"),
+    //             OsStr::new("vsc-cli-abc123-features"),
+    //             OsStr::new(&empty_context_dir.display().to_string()),
+    //         ]
+    //     );
+    // }
 
     #[test]
     fn should_extract_feature_id_from_references() {

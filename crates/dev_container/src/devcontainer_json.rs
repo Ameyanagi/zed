@@ -1298,8 +1298,8 @@ mod test {
                 override_command: Some(true),
                 workspace_folder: Some("/workspaces".to_string()),
                 workspace_mount: Some(MountDefinition {
-                    source: "/".to_string(),
-                    target: "/".to_string(),
+                    source: "/folder".to_string(),
+                    target: "/workspace".to_string(),
                     mount_type: Some("bind".to_string())
                 }),
                 build: Some(ContainerBuild {

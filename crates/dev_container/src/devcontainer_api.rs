@@ -52,6 +52,7 @@ pub(crate) struct DevContainerUp {
     pub(crate) container_id: String,
     pub(crate) remote_user: String,
     pub(crate) remote_workspace_folder: String,
+    #[serde(default)]
     pub(crate) extension_ids: Vec<String>,
 }
 
@@ -686,6 +687,7 @@ mod tests {
     }
 
     #[test]
+    // This test is no longer valid
     fn should_parse_from_devcontainer_json() {
         let json = r#"{"outcome":"success","containerId":"826abcac45afd412abff083ab30793daff2f3c8ce2c831df728baf39933cb37a","remoteUser":"vscode","remoteWorkspaceFolder":"/workspaces/zed"}"#;
         let up: DevContainerUp = parse_json_from_cli(json).unwrap();
