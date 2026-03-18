@@ -591,15 +591,18 @@ pub fn start_of_excerpt(
     };
     match direction {
         Direction::Prev => {
-            let start_anchor = map
-                .buffer_anchor_to_anchor(excerpt_range.context.start)
-                .unwrap();
+            let Some(start_anchor) = map.buffer_anchor_to_anchor(excerpt_range.context.start)
+            else {
+                return display_point;
+            };
             let mut start = start_anchor.to_display_point(map);
             if start >= display_point && start.row() > DisplayRow(0) {
                 let Some(excerpt) = map.buffer_snapshot().excerpt_before(start_anchor) else {
                     return display_point;
                 };
-                start = excerpt.start_anchor().to_display_point(map);
+                if let Some(start_anchor) = map.buffer_anchor_to_anchor(excerpt.context.start) {
+                    start = start_anchor.to_display_point(map);
+                }
             }
             start
         }
@@ -625,10 +628,11 @@ pub fn end_of_excerpt(
     };
     match direction {
         Direction::Prev => {
-            let mut start = map
-                .buffer_anchor_to_anchor(excerpt_range.context.start)
-                .unwrap()
-                .to_display_point(map);
+            let Some(start_anchor) = map.buffer_anchor_to_anchor(excerpt_range.context.start)
+            else {
+                return display_point;
+            };
+            let mut start = start_anchor.to_display_point(map);
             if start.row() > DisplayRow(0) {
                 *start.row_mut() -= 1;
             }
@@ -637,10 +641,10 @@ pub fn end_of_excerpt(
             start
         }
         Direction::Next => {
-            let mut end = map
-                .buffer_anchor_to_anchor(excerpt_range.context.start)
-                .unwrap()
-                .to_display_point(map);
+            let Some(end_anchor) = map.buffer_anchor_to_anchor(excerpt_range.context.start) else {
+                return display_point;
+            };
+            let mut end = end_anchor.to_display_point(map);
             *end.column_mut() = 0;
             if end <= display_point {
                 *end.row_mut() += 1;
@@ -651,10 +655,9 @@ pub fn end_of_excerpt(
                 else {
                     return display_point;
                 };
-                end = map
-                    .buffer_anchor_to_anchor(excerpt_range.context.end)
-                    .unwrap()
-                    .to_display_point(map);
+                if let Some(end_anchor) = map.buffer_anchor_to_anchor(excerpt_range.context.end) {
+                    end = end_anchor.to_display_point(map);
+                }
                 *end.column_mut() = 0;
             }
             end

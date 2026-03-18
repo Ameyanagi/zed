@@ -197,6 +197,7 @@ pub struct MultiBufferDiffHunk {
     /// The word diffs for this hunk.
     pub word_diffs: Vec<Range<MultiBufferOffset>>,
     pub excerpt_range: ExcerptRange<text::Anchor>,
+    // FIXME get rid of
     path_key_index: PathKeyIndex,
 }
 
@@ -829,98 +830,6 @@ pub(crate) struct Excerpt {
     /// A summary of the text in the excerpt
     pub(crate) text_summary: TextSummary,
     pub(crate) has_trailing_newline: bool,
-}
-
-// FIXME delete
-#[derive(Clone, Copy)]
-pub struct MultiBufferExcerpt2<'a> {
-    excerpt: &'a Excerpt,
-    buffer_snapshot: &'a BufferSnapshot,
-}
-
-impl<'a> fmt::Debug for MultiBufferExcerpt2<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MultiBufferExcerpt2")
-            .field("excerpt", &self.excerpt.info())
-            .finish()
-    }
-}
-
-impl<'a> MultiBufferExcerpt2<'a> {
-    pub fn buffer_snapshot(&self) -> &'a BufferSnapshot {
-        self.buffer_snapshot
-    }
-
-    pub fn info(&self) -> ExcerptInfo {
-        ExcerptInfo {
-            buffer_id: self.buffer_id(),
-            range: self.excerpt_range(),
-            path_key_index: self.excerpt.path_key_index,
-        }
-    }
-
-    /// Does not clip
-    pub fn anchor_range(&self, range: Range<text::Anchor>) -> Range<Anchor> {
-        todo!()
-    }
-
-    /// Does not clip
-    pub fn anchor_range_checked(&self, range: Range<text::Anchor>) -> Option<Range<Anchor>> {
-        todo!()
-    }
-
-    /// Infallibly retrieve the buffer entity for this excerpt
-    pub fn buffer(&self, multibuffer: &MultiBuffer) -> Entity<Buffer> {
-        todo!()
-    }
-
-    pub fn excerpt_range(&self) -> ExcerptRange<text::Anchor> {
-        self.excerpt.range.clone()
-    }
-
-    pub fn buffer_range(&self) -> Range<text::Anchor> {
-        self.excerpt.range.context.clone()
-    }
-
-    pub fn multibuffer_range(&self) -> Range<Anchor> {
-        Anchor::range_in_buffer(self.path_key_index(), self.excerpt.range.context.clone())
-    }
-
-    pub fn path_key(&self) -> &'a PathKey {
-        &self.excerpt.path_key
-    }
-
-    pub fn buffer_id(&self) -> BufferId {
-        self.buffer_snapshot.remote_id()
-    }
-
-    pub fn anchor(&self, text_anchor: text::Anchor) -> Anchor {
-        debug_assert_eq!(self.buffer_id(), text_anchor.buffer_id);
-        ExcerptAnchor {
-            text_anchor,
-            path: self.excerpt.path_key_index,
-            diff_base_anchor: None,
-        }
-        .into()
-    }
-
-    pub fn path_key_index(&self) -> PathKeyIndex {
-        self.excerpt.path_key_index
-    }
-
-    pub fn start_anchor(&self) -> Anchor {
-        self.multibuffer_range().start
-    }
-
-    pub fn end_anchor(&self) -> Anchor {
-        self.multibuffer_range().end
-    }
-}
-
-impl PartialEq for MultiBufferExcerpt2<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.excerpt == other.excerpt
-    }
 }
 
 /// A range of text from a single [`Buffer`], to be shown as an `Excerpt`.
@@ -5565,8 +5474,8 @@ impl MultiBufferSnapshot {
         }
     }
 
-    pub fn excerpts(&self) -> impl Iterator<Item = MultiBufferExcerpt2<'_>> {
-        self.excerpts.iter().map(|excerpt| excerpt.excerpt2(self))
+    pub fn excerpts(&self) -> impl Iterator<Item = ExcerptRange<text::Anchor>> {
+        self.excerpts.iter().map(|excerpt| excerpt.range.clone())
     }
 
     fn cursor<'a, MBD, BD>(&'a self) -> MultiBufferCursor<'a, MBD, BD>
@@ -5584,12 +5493,12 @@ impl MultiBufferSnapshot {
         }
     }
 
-    pub fn excerpt_before(&self, anchor: Anchor) -> Option<MultiBufferExcerpt2<'_>> {
+    pub fn excerpt_before(&self, anchor: Anchor) -> Option<ExcerptRange<text::Anchor>> {
         let target = anchor.try_seek_target(&self)?;
         let mut excerpts = self.excerpts.cursor::<ExcerptSummary>(());
         excerpts.seek(&target, Bias::Left);
         excerpts.prev();
-        Some(excerpts.item()?.excerpt2(self))
+        Some(excerpts.item()?.range.clone())
     }
 
     pub fn excerpt_boundaries_in_range<R, T>(
@@ -7430,14 +7339,6 @@ impl Excerpt {
 
     fn end_anchor(&self) -> ExcerptAnchor {
         ExcerptAnchor::in_buffer(self.path_key_index, self.range.context.end)
-    }
-
-    // FIXME name
-    fn excerpt2<'a>(&'a self, snapshot: &'a MultiBufferSnapshot) -> MultiBufferExcerpt2<'a> {
-        MultiBufferExcerpt2 {
-            excerpt: self,
-            buffer_snapshot: self.buffer_snapshot(snapshot),
-        }
     }
 }
 

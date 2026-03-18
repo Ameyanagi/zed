@@ -11,8 +11,7 @@ use itertools::Itertools;
 use language::{Buffer, Capability};
 use multi_buffer::{
     Anchor, AnchorRangeExt as _, BufferOffset, ExcerptInfo, ExcerptRange, ExpandExcerptDirection,
-    MultiBuffer, MultiBufferDiffHunk, MultiBufferExcerpt2, MultiBufferPoint, MultiBufferSnapshot,
-    PathKey,
+    MultiBuffer, MultiBufferDiffHunk, MultiBufferPoint, MultiBufferSnapshot, PathKey,
 };
 use project::Project;
 use rope::Point;
@@ -1577,33 +1576,40 @@ impl SplittableEditor {
         assert_eq!(lhs_excerpts.len(), rhs_excerpts.len());
 
         for (lhs_excerpt, rhs_excerpt) in lhs_excerpts.into_iter().zip(rhs_excerpts) {
-            assert_eq!(lhs_excerpt.path_key(), rhs_excerpt.path_key());
+            assert_eq!(
+                lhs_snapshot
+                    .path_for_buffer(lhs_excerpt.context.start.buffer_id)
+                    .unwrap(),
+                rhs_snapshot
+                    .path_for_buffer(rhs_excerpt.context.start.buffer_id)
+                    .unwrap(),
+                "corresponding excerpts should have the same path"
+            );
             let diff = self
                 .rhs_multibuffer
                 .read(cx)
-                .diff_for(rhs_excerpt.buffer_id())
+                .diff_for(rhs_excerpt.context.start.buffer_id)
                 .expect("missing diff");
             assert_eq!(
-                lhs_excerpt.buffer_id(),
+                lhs_excerpt.context.start.buffer_id,
                 diff.read(cx).base_text(cx).remote_id(),
                 "corresponding lhs excerpt should show diff base text"
             );
 
             let diff_snapshot = diff.read(cx).snapshot(cx);
-            let lhs_range = lhs_excerpt
-                .buffer_range()
-                .to_point(lhs_excerpt.buffer_snapshot());
-            let rhs_range = rhs_excerpt
-                .buffer_range()
-                .to_point(rhs_excerpt.buffer_snapshot());
+            let lhs_buffer_snapshot = lhs_snapshot
+                .buffer_for_id(lhs_excerpt.context.start.buffer_id)
+                .unwrap();
+            let rhs_buffer_snapshot = rhs_snapshot
+                .buffer_for_id(rhs_excerpt.context.start.buffer_id)
+                .unwrap();
+            let lhs_range = lhs_excerpt.context.to_point(&lhs_buffer_snapshot);
+            let rhs_range = rhs_excerpt.context.to_point(&rhs_buffer_snapshot);
             assert_eq!(
                 lhs_range,
-                diff_snapshot
-                    .buffer_point_to_base_text_point(rhs_range.start, rhs_excerpt.buffer_snapshot())
-                    ..diff_snapshot.buffer_point_to_base_text_point(
-                        rhs_range.end,
-                        rhs_excerpt.buffer_snapshot()
-                    ),
+                diff_snapshot.buffer_point_to_base_text_point(rhs_range.start, rhs_buffer_snapshot)
+                    ..diff_snapshot
+                        .buffer_point_to_base_text_point(rhs_range.end, rhs_buffer_snapshot,),
                 "corresponding lhs excerpt should have a matching range"
             )
         }
@@ -2253,12 +2259,16 @@ mod tests {
                     if !excerpts.is_empty() {
                         let count = rng.random_range(1..=excerpts.len().min(3));
                         let chosen: Vec<_> =
-                            excerpts.choose_multiple(rng, count).copied().collect();
+                            excerpts.choose_multiple(rng, count).cloned().collect();
                         let line_count = rng.random_range(1..5);
                         log::info!("expanding {count} excerpts by {line_count} lines");
                         editor.update(cx, |editor, cx| {
                             editor.expand_excerpts(
-                                chosen.into_iter().map(|excerpt| excerpt.start_anchor()),
+                                chosen.into_iter().map(|excerpt| {
+                                    snapshot
+                                        .buffer_anchor_to_anchor(excerpt.context.start)
+                                        .unwrap()
+                                }),
                                 line_count,
                                 ExpandExcerptDirection::UpAndDown,
                                 cx,
@@ -2342,7 +2352,11 @@ mod tests {
             let snapshot = editor.rhs_multibuffer.read(cx).snapshot(cx);
             snapshot
                 .excerpts()
-                .map(|excerpt| excerpt.start_anchor())
+                .map(|excerpt| {
+                    snapshot
+                        .buffer_anchor_to_anchor(excerpt.context.start)
+                        .unwrap()
+                })
                 .collect::<Vec<_>>()
         });
         editor.update(cx, |editor, cx| {

@@ -225,17 +225,15 @@ impl FollowableItem for Editor {
         let mut path_excerpts: Vec<proto::PathExcerpts> = Vec::new();
         for excerpt in snapshot.excerpts() {
             if let Some(prev_entry) = path_excerpts.last_mut()
-                && prev_entry.path_key == Some(serialize_path_key(&excerpt.path_key()))
-                && prev_entry.buffer_id == excerpt.buffer_id().to_proto()
+                && prev_entry.buffer_id == excerpt.context.start.buffer_id.to_proto()
             {
-                prev_entry
-                    .ranges
-                    .push(serialize_excerpt_range(excerpt.excerpt_range()));
-            } else {
+                prev_entry.ranges.push(serialize_excerpt_range(excerpt));
+            } else if let Some(path_key) = snapshot.path_for_buffer(excerpt.context.start.buffer_id)
+            {
                 path_excerpts.push(proto::PathExcerpts {
-                    path_key: Some(serialize_path_key(excerpt.path_key())),
-                    buffer_id: excerpt.buffer_id().to_proto(),
-                    ranges: vec![serialize_excerpt_range(excerpt.excerpt_range())],
+                    path_key: Some(serialize_path_key(path_key)),
+                    buffer_id: excerpt.context.start.buffer_id.to_proto(),
+                    ranges: vec![serialize_excerpt_range(excerpt)],
                 });
             }
         }

@@ -24446,7 +24446,7 @@ async fn test_multi_buffer_navigation_with_folded_buffers(cx: &mut TestAppContex
             .read(cx)
             .snapshot(cx)
             .excerpts()
-            .map(|excerpt| excerpt.buffer_id())
+            .map(|excerpt| excerpt.context.start.buffer_id)
             .collect::<Vec<_>>();
         // fold all but the second buffer, so that we test navigating between two
         // adjacent folded buffers, as well as folded buffers at the start and
@@ -30035,7 +30035,7 @@ async fn test_multibuffer_selections_with_folding(cx: &mut TestAppContext) {
     let buffer_ids = cx.multibuffer(|mb, cx| {
         mb.snapshot(cx)
             .excerpts()
-            .map(|excerpt| excerpt.buffer_id())
+            .map(|excerpt| excerpt.context.start.buffer_id)
             .collect::<Vec<_>>()
     });
 

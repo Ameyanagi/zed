@@ -468,9 +468,17 @@ impl EditorTestContext {
                 .excerpts()
                 .map(|info| {
                     (
-                        info.buffer_snapshot().clone(),
-                        info.multibuffer_range(),
-                        info.excerpt_range(),
+                        multibuffer_snapshot
+                            .buffer_for_id(info.context.start.buffer_id)
+                            .cloned()
+                            .unwrap(),
+                        multibuffer_snapshot
+                            .buffer_anchor_to_anchor(info.context.start)
+                            .unwrap()
+                            ..multibuffer_snapshot
+                                .buffer_anchor_to_anchor(info.context.end)
+                                .unwrap(),
+                        info,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -573,12 +581,11 @@ impl EditorTestContext {
             let excerpts = multibuffer_snapshot
                 .excerpts()
                 .map(|info| {
-                    let is_folded = editor.is_buffer_folded(info.buffer_id(), cx);
-                    (
-                        info.buffer_snapshot().clone(),
-                        info.excerpt_range(),
-                        is_folded,
-                    )
+                    let buffer_snapshot = multibuffer_snapshot
+                        .buffer_for_id(info.context.start.buffer_id)
+                        .unwrap();
+                    let is_folded = editor.is_buffer_folded(buffer_snapshot.remote_id(), cx);
+                    (buffer_snapshot.clone(), info, is_folded)
                 })
                 .collect::<Vec<_>>();
 

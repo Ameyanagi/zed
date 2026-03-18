@@ -23917,22 +23917,21 @@ impl Editor {
                     let snapshot = editor.buffer.read(cx).snapshot(cx);
                     let mut new_inlays = Vec::default();
 
-                    for excerpt in snapshot.excerpts() {
-                        let buffer_id = excerpt.buffer_id();
-                        buffer_inline_values
-                            .get(&buffer_id)
-                            .into_iter()
-                            .flatten()
-                            .for_each(|hint| {
-                                let inlay = Inlay::debugger(
-                                    post_inc(&mut editor.next_inlay_id),
-                                    excerpt.anchor(hint.position),
-                                    hint.text(),
-                                );
-                                if !inlay.text().chars().contains(&'\n') {
-                                    new_inlays.push(inlay);
-                                }
-                            });
+                    for (_buffer_id, inline_values) in buffer_inline_values {
+                        for hint in inline_values {
+                            let Some(anchor) = snapshot.buffer_anchor_to_anchor(hint.position)
+                            else {
+                                continue;
+                            };
+                            let inlay = Inlay::debugger(
+                                post_inc(&mut editor.next_inlay_id),
+                                anchor,
+                                hint.text(),
+                            );
+                            if !inlay.text().chars().contains(&'\n') {
+                                new_inlays.push(inlay);
+                            }
+                        }
                     }
 
                     let mut inlay_ids = new_inlays.iter().map(|inlay| inlay.id).collect();

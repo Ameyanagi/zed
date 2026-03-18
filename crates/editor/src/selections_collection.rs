@@ -676,8 +676,8 @@ impl<'snap, 'a> MutableSelectionsCollection<'snap, 'a> {
             let buffer_snapshot = self.snapshot.buffer_snapshot();
             let anchor = buffer_snapshot
                 .excerpts()
-                .find(|excerpt| excerpt.buffer_id() == buffer_id)
-                .map(|excerpt| excerpt.start_anchor())
+                .find(|excerpt| excerpt.context.start.buffer_id == buffer_id)
+                .and_then(|excerpt| buffer_snapshot.buffer_anchor_to_anchor(excerpt.context.start))
                 .unwrap_or_else(|| self.snapshot.anchor_before(MultiBufferOffset(0)));
             self.collection.disjoint = Arc::from([Selection {
                 id: post_inc(&mut self.collection.next_selection_id),
