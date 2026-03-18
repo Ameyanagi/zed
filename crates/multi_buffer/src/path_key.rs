@@ -529,6 +529,7 @@ impl MultiBuffer {
             buffer_id,
             BufferStateSnapshot {
                 path_key: path_key.clone(),
+                path_key_index,
                 buffer_snapshot: buffer_snapshot.clone(),
             },
         );

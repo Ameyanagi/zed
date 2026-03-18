@@ -586,15 +586,17 @@ pub fn start_of_excerpt(
     direction: Direction,
 ) -> DisplayPoint {
     let point = map.display_point_to_point(display_point, Bias::Left);
-    let Some(excerpt) = map.buffer_snapshot().excerpt_containing2(point..point) else {
+    let Some((_, excerpt_range)) = map.buffer_snapshot().excerpt_containing2(point..point) else {
         return display_point;
     };
     match direction {
         Direction::Prev => {
-            let mut start = excerpt.start_anchor().to_display_point(map);
+            let start_anchor = map
+                .buffer_anchor_to_anchor(excerpt_range.context.start)
+                .unwrap();
+            let mut start = start_anchor.to_display_point(map);
             if start >= display_point && start.row() > DisplayRow(0) {
-                let Some(excerpt) = map.buffer_snapshot().excerpt_before(excerpt.start_anchor())
-                else {
+                let Some(excerpt) = map.buffer_snapshot().excerpt_before(start_anchor) else {
                     return display_point;
                 };
                 start = excerpt.start_anchor().to_display_point(map);
@@ -602,7 +604,10 @@ pub fn start_of_excerpt(
             start
         }
         Direction::Next => {
-            let mut end = excerpt.end_anchor().to_display_point(map);
+            let mut end = map
+                .buffer_anchor_to_anchor(excerpt_range.context.end)
+                .unwrap()
+                .to_display_point(map);
             *end.row_mut() += 1;
             map.clip_point(end, Bias::Right)
         }
@@ -615,12 +620,15 @@ pub fn end_of_excerpt(
     direction: Direction,
 ) -> DisplayPoint {
     let point = map.display_point_to_point(display_point, Bias::Left);
-    let Some(excerpt) = map.buffer_snapshot().excerpt_containing2(point..point) else {
+    let Some((_, excerpt_range)) = map.buffer_snapshot().excerpt_containing2(point..point) else {
         return display_point;
     };
     match direction {
         Direction::Prev => {
-            let mut start = excerpt.start_anchor().to_display_point(map);
+            let mut start = map
+                .buffer_anchor_to_anchor(excerpt_range.context.start)
+                .unwrap()
+                .to_display_point(map);
             if start.row() > DisplayRow(0) {
                 *start.row_mut() -= 1;
             }
@@ -629,18 +637,24 @@ pub fn end_of_excerpt(
             start
         }
         Direction::Next => {
-            let mut end = excerpt.end_anchor().to_display_point(map);
+            let mut end = map
+                .buffer_anchor_to_anchor(excerpt_range.context.start)
+                .unwrap()
+                .to_display_point(map);
             *end.column_mut() = 0;
             if end <= display_point {
                 *end.row_mut() += 1;
                 let point_end = map.display_point_to_point(end, Bias::Right);
-                let Some(excerpt) = map
+                let Some((_, excerpt_range)) = map
                     .buffer_snapshot()
                     .excerpt_containing2(point_end..point_end)
                 else {
                     return display_point;
                 };
-                end = excerpt.end_anchor().to_display_point(map);
+                end = map
+                    .buffer_anchor_to_anchor(excerpt_range.context.end)
+                    .unwrap()
+                    .to_display_point(map);
                 *end.column_mut() = 0;
             }
             end

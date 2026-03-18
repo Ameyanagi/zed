@@ -1264,7 +1264,7 @@ impl BlockMap {
             our_buffer,
             range,
         );
-        // FIXME  hack hack hack
+        // FIXME hack hack hack
         if let Some(patch) = patches.last()
             && let Bound::Excluded(..) = bounds.1
             && patch.source_excerpt_range.is_empty()

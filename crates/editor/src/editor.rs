@@ -12962,7 +12962,7 @@ impl Editor {
 
                 // Don't move lines across excerpts
                 if buffer
-                    .excerpt_containing(insertion_point..range_to_move.end)
+                    .excerpt_containing2(insertion_point..range_to_move.end)
                     .is_some()
                 {
                     let text = buffer
@@ -13067,7 +13067,7 @@ impl Editor {
 
                 // Don't move lines across excerpt boundaries
                 if buffer
-                    .excerpt_containing(range_to_move.start..insertion_point)
+                    .excerpt_containing2(range_to_move.start..insertion_point)
                     .is_some()
                 {
                     let mut text = String::from("\n");
@@ -16765,10 +16765,7 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let old_selections: Box<[_]> = self
-            .selections
-            .all::<MultiBufferOffset>(&self.display_snapshot(cx))
-            .into();
+        let old_selections = self.selections.all_anchors(&self.display_snapshot(cx));
         if old_selections.is_empty() {
             return;
         }
@@ -16781,20 +16778,15 @@ impl Editor {
         let new_selections = old_selections
             .iter()
             .map(|selection| {
-                let old_range = selection.start..selection.end;
-
-                let old_range =
-                    old_range.start.to_offset(&buffer)..old_range.end.to_offset(&buffer);
-                let excerpt = buffer.excerpt_containing(old_range.clone());
-
-                if let Some(mut excerpt) = excerpt
-                    && let Some(node) = excerpt
-                        .buffer(&buffer)
-                        .syntax_next_sibling(excerpt.map_range_to_buffer(old_range))
+                let old_range = selection.range();
+                if let Some((buffer_snapshot, buffer_range)) =
+                    buffer.anchor_range_to_buffer_anchor_range(old_range)
+                    && let Some(node) =
+                        buffer_snapshot.syntax_next_sibling(buffer_range.to_offset(buffer_snapshot))
+                    && let Some(new_range) = buffer.anchor_range_in_buffer_unchecked(
+                        buffer_snapshot.anchor_range_inside(node.byte_range()),
+                    )
                 {
-                    let new_range = excerpt.map_range_from_buffer(
-                        BufferOffset(node.byte_range().start)..BufferOffset(node.byte_range().end),
-                    );
                     selected_sibling = true;
                     Selection {
                         id: selection.id,
@@ -17477,10 +17469,11 @@ impl Editor {
         if direction == ExpandExcerptDirection::Down {
             let multi_buffer = self.buffer.read(cx);
             let snapshot = multi_buffer.snapshot(cx);
-            if let Some(excerpt) = snapshot.excerpt_containing2(excerpt_anchor..excerpt_anchor) {
-                let buffer_snapshot = excerpt.buffer_snapshot(&snapshot);
+            if let Some((buffer_snapshot, excerpt_range)) =
+                snapshot.excerpt_containing2(excerpt_anchor..excerpt_anchor)
+            {
                 let excerpt_end_row =
-                    Point::from_anchor(&excerpt.buffer_range().end, &buffer_snapshot).row;
+                    Point::from_anchor(&excerpt_range.context.end, &buffer_snapshot).row;
                 let last_row = buffer_snapshot.max_point().row;
                 let lines_below = last_row.saturating_sub(excerpt_end_row);
                 if lines_below >= lines_to_expand {
@@ -20480,14 +20473,6 @@ impl Editor {
             return;
         }
 
-        let mut buffers_affected = HashSet::default();
-        let multi_buffer = self.buffer().read(cx).snapshot(cx);
-        for range in ranges {
-            if let Some(excerpt) = multi_buffer.excerpt_containing2(range.clone()) {
-                buffers_affected.insert(excerpt.buffer_id);
-            };
-        }
-
         self.display_map.update(cx, update);
 
         if auto_scroll {
@@ -20569,17 +20554,17 @@ impl Editor {
             }
             buffer
                 .diff_hunks_in_range(range.start..peek_end)
-                .filter_map(move |hunk| {
-                    if hunk
-                        .excerpt_info
-                        .multibuffer_range()
-                        .end
-                        .cmp(&end_excerpt.as_ref()?.end_anchor(), buffer)
-                        .is_le()
+                .filter(move |hunk| {
+                    if let Some((_, excerpt_range)) = &end_excerpt
+                        && let Some(end_anchor) =
+                            buffer.buffer_anchor_to_anchor(excerpt_range.context.end)
+                        && let Some(hunk_end_anchor) =
+                            buffer.buffer_anchor_to_anchor(hunk.excerpt_range.context.end)
+                        && hunk_end_anchor.cmp(&end_anchor, buffer).is_gt()
                     {
-                        Some(hunk)
+                        false
                     } else {
-                        None
+                        true
                     }
                 })
         })

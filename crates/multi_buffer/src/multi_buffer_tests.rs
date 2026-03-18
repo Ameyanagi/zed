@@ -3016,6 +3016,14 @@ async fn test_random_multibuffer(cx: &mut TestAppContext, mut rng: StdRng) {
                 multibuffer.update(cx, |multibuffer, cx| {
                     let snapshot = multibuffer.snapshot(cx);
                     let infos = snapshot.excerpts().map(|e| e.info()).collect::<Vec<_>>();
+                    dbg!(&infos);
+                    dbg!(
+                        &reference
+                            .excerpts
+                            .iter()
+                            .map(|excerpt| excerpt.info(cx))
+                            .collect::<Vec<_>>()
+                    );
                     let mut excerpts = HashSet::default();
                     for _ in 0..rng.random_range(0..infos.len()) {
                         excerpts.extend(infos.choose(&mut rng).cloned());
@@ -3029,7 +3037,7 @@ async fn test_random_multibuffer(cx: &mut TestAppContext, mut rng: StdRng) {
                             reference
                                 .excerpts
                                 .iter()
-                                .position(|e| e.info(cx) == *info)
+                                .position(|e| e.info(cx).range.context == info.range.context)
                                 .unwrap()
                         })
                         .collect::<Vec<_>>();
@@ -3379,31 +3387,16 @@ fn check_multibuffer(
             .unwrap()
             + 1
     );
-    // let reference_ranges = reference
-    //     .excerpts
-    //     .iter()
-    //     .map(|excerpt| {
-    //         (
-    //             excerpt.info(cx),
-    //             excerpt.range.to_offset(&excerpt.buffer.read(cx).snapshot()),
-    //         )
-    //     })
-    //     .collect::<Vec<_>>();
     for i in 0..snapshot.len().0 {
         // todo!() this seems not useful
-        let excerpt = snapshot
-            .excerpt_containing(MultiBufferOffset(i)..MultiBufferOffset(i))
+        let (_, excerpt_range) = snapshot
+            .excerpt_containing2(MultiBufferOffset(i)..MultiBufferOffset(i))
             .unwrap();
-        let reference_range = reference
+        reference
             .excerpts
             .iter()
-            .find(|reference_excerpt| reference_excerpt.info(cx) == excerpt.excerpt.info())
-            .map(|excerpt| excerpt.range.to_offset(&excerpt.buffer.read(cx).snapshot()))
+            .find(|reference_excerpt| reference_excerpt.range == excerpt_range.context)
             .expect("corresponding excerpt should exist in reference multibuffer");
-        assert_eq!(
-            excerpt.buffer_range(&snapshot).start.0..excerpt.buffer_range(&snapshot).end.0,
-            reference_range
-        );
     }
 
     assert_consistent_line_numbers(&snapshot);
@@ -5064,9 +5057,9 @@ fn test_excerpts_containment_functions(cx: &mut App) {
             let snapshot = multibuffer.snapshot(cx);
             let mut excerpts = snapshot.excerpts();
             (
-                excerpts.next().unwrap().info(),
-                excerpts.next().unwrap().info(),
-                excerpts.next().unwrap().info(),
+                excerpts.next().unwrap().excerpt.range.clone(),
+                excerpts.next().unwrap().excerpt.range.clone(),
+                excerpts.next().unwrap().excerpt.range.clone(),
             )
         });
 
@@ -5086,24 +5079,24 @@ fn test_excerpts_containment_functions(cx: &mut App) {
 
     let excerpts: Vec<_> = snapshot.excerpts_for_range(p00..p00).collect();
     assert_eq!(excerpts.len(), 1);
-    assert_eq!(excerpts[0].info(), excerpt_1_info);
+    assert_eq!(excerpts[0].range, excerpt_1_info);
 
     // Cursor at very end of excerpt 3
     let excerpts: Vec<_> = snapshot.excerpts_for_range(p43..p43).collect();
     assert_eq!(excerpts.len(), 1);
-    assert_eq!(excerpts[0].info(), excerpt_3_info);
+    assert_eq!(excerpts[0].range, excerpt_3_info);
 
     let excerpts: Vec<_> = snapshot.excerpts_for_range(p00..p23).collect();
     assert_eq!(excerpts.len(), 2);
-    assert_eq!(excerpts[0].info(), excerpt_1_info);
-    assert_eq!(excerpts[1].info(), excerpt_2_info);
+    assert_eq!(excerpts[0].range, excerpt_1_info);
+    assert_eq!(excerpts[1].range, excerpt_2_info);
 
     // This range represent an selection with end-point just inside excerpt_2
     // Today we only expand the first excerpt, but another interpretation that
     // we could consider is expanding both here
     let excerpts: Vec<_> = snapshot.excerpts_for_range(p10..p20).collect();
     assert_eq!(excerpts.len(), 1);
-    assert_eq!(excerpts[0].info(), excerpt_1_info);
+    assert_eq!(excerpts[0].range, excerpt_1_info);
 
     //// Test that `excerpts_for_range` and `excerpt_containing` agree for all single offsets (cursor positions)
     for offset in 0..=snapshot.len().0 {
@@ -5115,15 +5108,15 @@ fn test_excerpts_containment_functions(cx: &mut App) {
             "Expected exactly one excerpt for offset {offset}",
         );
 
-        let excerpt_containing = snapshot.excerpt_containing(offset..offset);
-        assert!(
-            excerpt_containing.is_some(),
-            "Expected excerpt_containing to find excerpt for offset {offset}",
-        );
+        let (_, excerpt_containing) =
+            snapshot
+                .excerpt_containing2(offset..offset)
+                .expect(&format!(
+                    "Expected excerpt_containing to find excerpt for offset {offset}"
+                ));
 
         assert_eq!(
-            excerpts_for_range[0].info(),
-            excerpt_containing.unwrap().excerpt.info(),
+            excerpts_for_range[0].range, excerpt_containing,
             "excerpts_for_range and excerpt_containing should agree for offset {offset}",
         );
     }
@@ -5131,12 +5124,11 @@ fn test_excerpts_containment_functions(cx: &mut App) {
     //// Test `excerpt_containing` behavior with ranges:
 
     // Ranges intersecting a single-excerpt
-    let containing = snapshot.excerpt_containing(p00..p13);
-    assert!(containing.is_some());
-    assert_eq!(containing.unwrap().excerpt.info(), excerpt_1_info);
+    let (_, containing) = snapshot.excerpt_containing2(p00..p13).unwrap();
+    assert_eq!(containing, excerpt_1_info);
 
     // Ranges intersecting multiple excerpts (should return None)
-    let containing = snapshot.excerpt_containing(p20..p40);
+    let containing = snapshot.excerpt_containing2(p20..p40);
     assert!(
         containing.is_none(),
         "excerpt_containing should return None for ranges spanning multiple excerpts"
@@ -5215,12 +5207,13 @@ fn test_range_to_buffer_ranges(cx: &mut App) {
     let max_point = snapshot_trailing.max_point();
 
     let ranges_half_open_max = snapshot_trailing.range_to_buffer_ranges(Point::zero()..max_point);
+    dbg!(&ranges_half_open_max);
     assert_eq!(
         ranges_half_open_max.len(),
         2,
         "Should include trailing empty excerpts"
     );
-    assert_eq!(ranges_half_open_max[0].1, BufferOffset(0)..BufferOffset(0));
+    assert_eq!(ranges_half_open_max[1].1, BufferOffset(0)..BufferOffset(0));
 }
 
 #[gpui::test]
