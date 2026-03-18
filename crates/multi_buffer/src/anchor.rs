@@ -211,7 +211,8 @@ impl ExcerptAnchor {
         let Some(buffer_snapshot) = snapshot.buffer_for_id(self.buffer_id()) else {
             return false;
         };
-        if !self.text_anchor().is_valid(buffer_snapshot) {
+        // Early check to avoid invalid comparisons when seeking
+        if !buffer_snapshot.can_resolve(&self.text_anchor) {
             return false;
         }
         let mut cursor = snapshot.excerpts.cursor::<ExcerptSummary>(());
@@ -219,7 +220,10 @@ impl ExcerptAnchor {
         let Some(excerpt) = cursor.item() else {
             return false;
         };
-        excerpt.buffer_id == self.text_anchor().buffer_id
+        let is_valid = self.text_anchor == excerpt.range.context.start
+            || self.text_anchor == excerpt.range.context.end
+            || self.text_anchor.is_valid(&buffer_snapshot);
+        is_valid
             && excerpt
                 .range
                 .context

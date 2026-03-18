@@ -1264,11 +1264,15 @@ impl SplittableEditor {
                         let lhs_end = Point::new(lhs_hunk.row_range.end.0, 0);
                         let rhs_end = Point::new(rhs_hunk.row_range.end.0, 0);
 
-                        let lhs_excerpt_end =
-                            lhs_hunk.excerpt_info.end_anchor().to_point(&lhs_snapshot);
+                        let lhs_excerpt_end = lhs_snapshot
+                            .buffer_anchor_to_anchor(lhs_hunk.excerpt_range.context.end)
+                            .unwrap()
+                            .to_point(&lhs_snapshot);
                         let lhs_exceeds = lhs_end >= lhs_excerpt_end;
-                        let rhs_excerpt_end =
-                            rhs_hunk.excerpt_info.end_anchor().to_point(&rhs_snapshot);
+                        let rhs_excerpt_end = rhs_snapshot
+                            .buffer_anchor_to_anchor(rhs_hunk.excerpt_range.context.end)
+                            .unwrap()
+                            .to_point(&rhs_snapshot);
                         let rhs_exceeds = rhs_end >= rhs_excerpt_end;
                         if lhs_exceeds != rhs_exceeds {
                             continue;
