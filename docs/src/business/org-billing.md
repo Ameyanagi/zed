@@ -11,6 +11,8 @@ Zed Business consolidates your team's costs. Seat licenses and AI usage for all 
 
 ## Billing Dashboard {#dashboard}
 
+<!-- TODO: confirm exactly what billing information is shown in the dashboard before launch -->
+
 Owners and admins can access billing information at [dashboard.zed.dev](https://dashboard.zed.dev). The dashboard shows:
 
 - Current member count and seat charges
@@ -21,6 +23,8 @@ Owners and admins can access billing information at [dashboard.zed.dev](https://
 
 AI usage across the organization is metered on a token basis at the same rates as individual Pro subscriptions. See [Plans & Pricing](../ai/plans-and-usage.md#usage) for rate details.
 
+<!-- TODO: confirm org-wide spend limit behavior at launch (how limits are set, what happens when reached) -->
+
 Administrators can set an org-wide AI spend limit from [Admin Controls](./admin-controls.md). Once the limit is reached, AI usage is paused until the next billing period.
 
 ## Payment and Invoices {#invoices}
@@ -29,9 +33,11 @@ Organization billing uses Stripe for payments, via credit card or other supporte
 
 <!-- TODO: confirm whether invoice-based billing is available at launch -->
 
-Invoice history is accessible from the billing dashboard. For help updating payment methods, names, addresses, or tax IDs, email [billing-support@zed.dev](mailto:billing-support@zed.dev).
+Invoice history is accessible from the billing dashboard.
 
-> Self-service billing updates will be available in a future release.
+<!-- TODO: confirm whether owners/admins can update payment methods, addresses, and tax IDs self-serve at launch; if so, replace the below with instructions -->
+
+For help updating payment methods, names, addresses, or tax IDs, email [billing-support@zed.dev](mailto:billing-support@zed.dev).
 
 Changes to billing information affect future invoices only. Historical invoices can't be modified.
 

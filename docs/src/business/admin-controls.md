@@ -7,7 +7,7 @@ description: Configure AI, collaboration, and data sharing settings for your ent
 
 Owners and admins can configure settings that apply to every member of the organization.
 
-These controls apply to Zed's server-side features, meaning anything that routes through Zed's infrastructure. They don't cover bring-your-own-key (BYOK) configurations or third-party extensions, since those work independently of Zed's servers.
+These controls apply to Zed's server-side features, meaning anything that routes through Zed's infrastructure. They don't cover [bring-your-own-key (BYOK) configurations](../ai/llm-providers.md), [external agents](../ai/external-agents.md), or [third-party extensions](../extensions.md), since those work independently of Zed's servers.
 
 ## Accessing Admin Controls
 
@@ -43,7 +43,7 @@ Administrators can disable [Edit Predictions](../ai/edit-prediction.md) for all 
 
 ## Data Sharing
 
-By default, [data sharing with Zed for AI improvement](../ai/ai-improvement.md) is opt-in. Members choose individually whether to share [edit prediction training data](../ai/ai-improvement.md#edit-predictions) or [AI feedback via ratings](../ai/ai-improvement.md#ai-feedback-with-ratings).
+By default, [data sharing with Zed for AI improvement](../ai/ai-improvement.md) is opt-in for individual users not on a Business plan. Members choose individually whether to share [edit prediction training data](../ai/ai-improvement.md#edit-predictions) or [AI feedback via ratings](../ai/ai-improvement.md#ai-feedback-with-ratings).
 
 Administrators can enforce a no-sharing policy org-wide, blocking members from opting into either form of data sharing. This is enforced server-side, so members can't opt back in individually.
 

@@ -11,17 +11,18 @@ Zed works without AI features or a subscription. No [authentication](../authenti
 
 ## Plans {#plans}
 
-|                        | Free | Pro | Business |
-| ---------------------- | ---- | --- | -------- |
-| Hosted AI models       | —    | ✓   | ✓        |
-| Edit Predictions       | —    | ✓   | ✓        |
-| Enforced data controls | —    | —   | ✓        |
-| RBAC and permissions   | —    | —   | ✓        |
-| Consolidated billing   | —    | —   | ✓        |
+|                        | Free      | Pro       | Business  |
+| ---------------------- | --------- | --------- | --------- |
+| Zed-hosted AI models   | —         | ✓         | ✓         |
+| AI via own API keys    | ✓         | ✓         | ✓         |
+| Edit Predictions       | Limited   | Unlimited | Unlimited |
+| Enforced data controls | —         | —         | ✓         |
+| RBAC and permissions   | —         | —         | ✓         |
+| Consolidated billing   | —         | —         | ✓         |
 
 ## Zed Free {#free}
 
-The editor is free with no time limit. AI features (hosted models and Edit Predictions) are not included in the Free plan.
+The editor is free with no time limit. You can use AI with your own API keys via [Providers](./llm-providers.md). [Edit Predictions](./edit-prediction.md) are available on a limited basis. Zed's hosted models require a Pro subscription.
 
 ## Zed Pro {#pro}
 
@@ -39,7 +40,7 @@ For a full feature overview, see [Zed Business](../business/overview.md). For bi
 
 ## Student Plan {#student}
 
-The [Zed Student plan](https://zed.dev/education) includes $10/month in token credits, available free for one year to verified university students.
+The [Zed Student plan](https://zed.dev/education) includes all Zed Pro features: unlimited [Edit Predictions](./edit-prediction.md), all [hosted AI models](./models.md), and $10/month in token credits. Available free for one year to verified university students.
 
 ## Usage {#usage}
 

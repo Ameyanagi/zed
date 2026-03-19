@@ -16,22 +16,12 @@ Every member gets full Zed Pro access: all [hosted AI models](../ai/models.md) a
 For the organization:
 
 - **Enforced data controls:** Administrators decide which AI features are available. [Zed-hosted models](../ai/models.md), [Edit Predictions](../ai/edit-prediction.md), and [real-time collaboration](../collaboration/overview.md) can be toggled on or off for the whole org. Members can't override these settings individually.
-- **Private by default:** Zed doesn't store your prompts or train on them. [Data sharing for AI improvement](../ai/ai-improvement.md) is opt-in: members can choose to share but are never enrolled automatically. Administrators can enforce this org-wide, blocking members from opting in at all.
+- **Private by default:** Zed doesn't store your prompts or train on them without explicit opt-in. [Data sharing for AI improvement](../ai/ai-improvement.md) is opt-in: members can choose to share but are never enrolled automatically. Administrators can enforce this org-wide, blocking members from opting in at all.
 - **RBAC and permissions:** Owners, admins, and members have different access levels. Billing and org settings are only visible to the roles that need them.
 - **Consolidated billing:** Your team's licenses and AI usage appear on one invoice, with no separate bills per member.
 
 <!-- TODO: confirm Edit Predictions behavior for Business (unlimited vs. metered) before launch -->
 <!-- TODO: confirm whether per-member usage visibility ships at launch -->
-
-## How It Differs from Pro
-
-|                        | Free | Pro | Business |
-| ---------------------- | ---- | --- | -------- |
-| Hosted AI models       | —    | ✓   | ✓        |
-| Edit Predictions       | —    | ✓   | ✓        |
-| Enforced data controls | —    | —   | ✓        |
-| RBAC and permissions   | —    | —   | ✓        |
-| Consolidated billing   | —    | —   | ✓        |
 
 ## Getting Started
 
