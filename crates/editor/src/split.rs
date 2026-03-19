@@ -10,8 +10,8 @@ use gpui::{Action, AppContext as _, Entity, EventEmitter, Focusable, Subscriptio
 use itertools::Itertools;
 use language::{Buffer, Capability};
 use multi_buffer::{
-    Anchor, AnchorRangeExt as _, BufferOffset, ExcerptInfo, ExcerptRange, ExpandExcerptDirection,
-    MultiBuffer, MultiBufferDiffHunk, MultiBufferPoint, MultiBufferSnapshot, PathKey,
+    Anchor, AnchorRangeExt as _, BufferOffset, ExcerptRange, ExpandExcerptDirection, MultiBuffer,
+    MultiBufferDiffHunk, MultiBufferPoint, MultiBufferSnapshot, PathKey,
 };
 use project::Project;
 use rope::Point;
@@ -170,7 +170,8 @@ where
     F: Fn(&BufferDiffSnapshot, RangeInclusive<Point>, &text::BufferSnapshot) -> Patch<Point>,
 {
     struct PendingExcerpt {
-        source_excerpt: ExcerptInfo,
+        source_buffer_snapshot: language::BufferSnapshot,
+        source_excerpt_range: ExcerptRange<text::Anchor>,
         buffer_point_range: Range<Point>,
     }
 
@@ -189,9 +190,10 @@ where
         };
 
         let diff = source_snapshot
-            .diff_for_buffer_id(first.source_excerpt.buffer_id)
+            .diff_for_buffer_id(first.source_buffer_snapshot.remote_id())
             .expect("buffer with no diff when creating patches");
-        let source_is_lhs = first.source_excerpt.buffer_id == diff.base_text().remote_id();
+        let source_is_lhs =
+            first.source_buffer_snapshot.remote_id() == diff.base_text().remote_id();
         let target_buffer_id = if source_is_lhs {
             diff.buffer_id()
         } else {
@@ -203,7 +205,7 @@ where
         let rhs_buffer = if source_is_lhs {
             target_buffer
         } else {
-            first.source_excerpt.buffer_snapshot(source_snapshot)
+            &first.source_buffer_snapshot
         };
 
         let patch = translate_fn(diff, union_start..=union_end, rhs_buffer);
@@ -216,7 +218,9 @@ where
                 dbg!("ONE");
                 continue;
             };
-            let Some(target_excerpt) = target_snapshot.excerpt_for_position(target_position) else {
+            let Some((target_buffer_snapshot, target_excerpt_range)) =
+                target_snapshot.excerpt_for_position(target_position)
+            else {
                 dbg!("TWO");
                 continue;
             };
@@ -224,16 +228,18 @@ where
             result.push(patch_for_excerpt(
                 source_snapshot,
                 target_snapshot,
-                excerpt.source_excerpt,
-                todo!("excerpt info"),
+                &excerpt.source_buffer_snapshot,
+                target_buffer_snapshot,
+                excerpt.source_excerpt_range,
+                target_excerpt_range,
                 &patch,
                 excerpt.buffer_point_range,
             ));
         }
     };
 
-    for (source_excerpt, source_range) in source_snapshot.range_to_buffer_ranges(source_bounds) {
-        let buffer_id = source_excerpt.buffer_id;
+    for (buffer_snapshot, source_range) in source_snapshot.range_to_buffer_ranges(source_bounds) {
+        let buffer_id = buffer_snapshot.remote_id();
 
         if current_buffer_id != Some(buffer_id) {
             if let (Some(start), Some(end)) = (union_context_start.take(), union_context_end.take())
@@ -243,11 +249,13 @@ where
             current_buffer_id = Some(buffer_id);
         }
 
-        let buffer_point_range =
-            source_range.to_point(source_excerpt.buffer_snapshot(source_snapshot));
-        let source_context_range = source_excerpt
-            .buffer_range()
-            .to_point(source_excerpt.buffer_snapshot(source_snapshot));
+        let buffer_point_range = source_range.to_point(&buffer_snapshot);
+        let Some((_, source_excerpt_range)) = source_snapshot
+            .excerpt_for_buffer_position(buffer_snapshot.anchor_after(source_range.start))
+        else {
+            todo!()
+        };
+        let source_context_range = source_excerpt_range.context.to_point(&buffer_snapshot);
 
         union_context_start = Some(union_context_start.map_or(source_context_range.start, |s| {
             s.min(source_context_range.start)
@@ -257,7 +265,8 @@ where
         }));
 
         pending_excerpts.push(PendingExcerpt {
-            source_excerpt,
+            source_buffer_snapshot: buffer_snapshot,
+            source_excerpt_range,
             buffer_point_range,
         });
     }
@@ -272,19 +281,27 @@ where
 fn patch_for_excerpt(
     source_snapshot: &MultiBufferSnapshot,
     target_snapshot: &MultiBufferSnapshot,
-    source_excerpt: ExcerptInfo,
-    target_excerpt: ExcerptInfo,
+    source_buffer_snapshot: &language::BufferSnapshot,
+    target_buffer_snapshot: &language::BufferSnapshot,
+    source_excerpt_range: ExcerptRange<text::Anchor>,
+    target_excerpt_range: ExcerptRange<text::Anchor>,
     patch: &Patch<Point>,
     source_edited_range: Range<Point>,
 ) -> CompanionExcerptPatch {
-    let source_buffer_range = source_excerpt
-        .buffer_range()
-        .to_point(source_excerpt.buffer_snapshot(source_snapshot));
-    let source_multibuffer_range = source_excerpt.multibuffer_range().to_point(source_snapshot);
-    let target_buffer_range = target_excerpt
-        .buffer_range()
-        .to_point(target_excerpt.buffer_snapshot(target_snapshot));
-    let target_multibuffer_range = target_excerpt.multibuffer_range().to_point(target_snapshot);
+    let source_buffer_range = source_excerpt_range
+        .context
+        .to_point(source_buffer_snapshot);
+    let source_multibuffer_range = source_snapshot
+        .anchor_range_in_buffer_unchecked(source_excerpt_range.context)
+        .expect("buffer should exist in multibuffer")
+        .to_point(source_snapshot);
+    let target_buffer_range = target_excerpt_range
+        .context
+        .to_point(target_buffer_snapshot);
+    let target_multibuffer_range = target_snapshot
+        .anchor_range_in_buffer_unchecked(target_excerpt_range.context)
+        .expect("buffer should exist in multibuffer")
+        .to_point(target_snapshot);
 
     let edits = patch
         .edits()
@@ -1122,7 +1139,7 @@ impl SplittableEditor {
                 let rhs_multibuffer_snapshot = rhs_multibuffer.snapshot(cx);
                 for info in rhs_multibuffer_snapshot.excerpts_for_buffer(main_buffer_id) {
                     have_excerpt = true;
-                    let rhs_context = info.range.context.to_point(&main_buffer_snapshot);
+                    let rhs_context = info.context.to_point(&main_buffer_snapshot);
                     let start = diff_snapshot
                         .buffer_point_to_base_text_range(
                             Point::new(rhs_context.start.row, 0),
@@ -1143,11 +1160,11 @@ impl SplittableEditor {
                     {
                         did_merge = true;
                         prev_lhs_context.end = lhs_context.end;
-                        prev_rhs_range.context.end = info.range.context.end;
+                        prev_rhs_range.context.end = info.context.end;
                         continue;
                     }
 
-                    paired_ranges.push((lhs_context, info.range));
+                    paired_ranges.push((lhs_context, info));
                 }
 
                 let (lhs_ranges, rhs_ranges): (Vec<_>, Vec<_>) = paired_ranges.into_iter().unzip();

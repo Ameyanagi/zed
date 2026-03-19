@@ -7871,22 +7871,17 @@ impl EditorElement {
                 return;
             }
             let buffer_snapshot = &display_snapshot.buffer_snapshot();
-            for (excerpt, buffer_range) in
+            for (excerpt_buffer_snapshot, buffer_range) in
                 buffer_snapshot.range_to_buffer_ranges(anchor_range.start..anchor_range.end)
             {
-                let buffer_range = excerpt
-                    .buffer_snapshot(buffer_snapshot)
-                    .anchor_after(buffer_range.start)
-                    ..excerpt
-                        .buffer_snapshot(buffer_snapshot)
-                        .anchor_before(buffer_range.end);
-                let excerpt_buffer_snapshot = excerpt.buffer_snapshot(buffer_snapshot).clone();
+                let buffer_range = excerpt_buffer_snapshot.anchor_after(buffer_range.start)
+                    ..excerpt_buffer_snapshot.anchor_before(buffer_range.end);
                 selections.extend(debug_ranges.ranges.iter().flat_map(|debug_range| {
                     debug_range.ranges.iter().filter_map(|range| {
                         let player_color = theme
                             .players()
                             .color_for_participant(debug_range.occurrence_index as u32 + 1);
-                        if range.start.buffer_id != excerpt.buffer_id {
+                        if range.start.buffer_id != excerpt_buffer_snapshot.remote_id() {
                             return None;
                         }
                         let clipped_start = range

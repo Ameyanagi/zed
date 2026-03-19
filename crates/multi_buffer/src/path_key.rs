@@ -61,16 +61,14 @@ impl MultiBuffer {
     pub fn buffer_for_path(&self, path: &PathKey, cx: &App) -> Option<Entity<Buffer>> {
         let snapshot = self.snapshot(cx);
         let excerpt = snapshot.excerpts_for_path(path).next()?;
-        self.buffer(excerpt.buffer_id)
+        self.buffer(excerpt.context.start.buffer_id)
     }
 
     pub fn location_for_path(&self, path: &PathKey, cx: &App) -> Option<Anchor> {
         let snapshot = self.snapshot(cx);
         let excerpt = snapshot.excerpts_for_path(path).next()?;
-        Some(Anchor::in_buffer(
-            excerpt.path_key_index,
-            excerpt.range.context.start,
-        ))
+        let path_key_index = snapshot.path_key_index_for_buffer(excerpt.context.start.buffer_id)?;
+        Some(Anchor::in_buffer(path_key_index, excerpt.context.start))
     }
 
     pub fn set_excerpts_for_buffer(

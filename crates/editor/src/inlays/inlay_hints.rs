@@ -330,7 +330,7 @@ impl Editor {
                 );
 
                 semantics_provider.invalidate_inlay_hints(&invalidate_hints_for_buffers, cx);
-                visible_excerpts.retain(|(visible_buffer, _, _, _)| {
+                visible_excerpts.retain(|(visible_buffer, _, _)| {
                     visible_buffer.read(cx).language() == Some(&affected_language)
                 });
                 false

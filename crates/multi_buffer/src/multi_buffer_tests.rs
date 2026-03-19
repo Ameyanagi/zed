@@ -2404,17 +2404,8 @@ struct ReferenceRegion {
     range: Range<usize>,
     buffer_range: Option<Range<Point>>,
     status: Option<DiffHunkStatus>,
-    excerpt_info: Option<ExcerptInfo>,
-}
-
-impl ReferenceExcerpt {
-    fn info(&self, cx: &App) -> ExcerptInfo {
-        ExcerptInfo {
-            path_key_index: self.path_key_index,
-            buffer_id: self.buffer.read(cx).remote_id(),
-            range: ExcerptRange::new(self.range.clone()),
-        }
-    }
+    excerpt_range: Option<Range<text::Anchor>>,
+    excerpt_path_key_index: Option<PathKeyIndex>,
 }
 
 impl ReferenceMultibuffer {
@@ -2606,7 +2597,7 @@ impl ReferenceMultibuffer {
                                     (offset..hunk_base_range.start).to_point(&buffer),
                                 ),
                                 status: None,
-                                excerpt_info: Some(excerpt.info(cx)),
+                                excerpt_range: Some(excerpt.range),
                             });
                         }
                     }
@@ -2620,7 +2611,8 @@ impl ReferenceMultibuffer {
                             range: len..text.len(),
                             buffer_range: Some(hunk_base_range.to_point(&buffer)),
                             status: Some(DiffHunkStatus::deleted(hunk.secondary_status)),
-                            excerpt_info: Some(excerpt.info(cx)),
+                            excerpt_range: Some(excerpt.range),
+                            excerpt_path_key_index: Some(excerpt.path_key_index),
                         });
                     }
 
@@ -2636,7 +2628,8 @@ impl ReferenceMultibuffer {
                     range: len..text.len(),
                     buffer_range: Some((offset..buffer_range.end).to_point(&buffer)),
                     status: None,
-                    excerpt_info: Some(excerpt.info(cx)),
+                    excerpt_range: Some(excerpt.range),
+                    excerpt_path_key_index: Some(excerpt.path_key_index),
                 });
             } else {
                 let diff = self.diffs.get(&buffer_id).unwrap().read(cx).snapshot(cx);
@@ -2689,7 +2682,8 @@ impl ReferenceMultibuffer {
                                 range: len..text.len(),
                                 buffer_range: Some((offset..hunk_range.start).to_point(&buffer)),
                                 status: None,
-                                excerpt_info: Some(excerpt.info(cx)),
+                                excerpt_range: Some(excerpt.range),
+                                excerpt_path_key_index: Some(excerpt.path_key_index),
                             });
                         }
 
@@ -2710,7 +2704,8 @@ impl ReferenceMultibuffer {
                                     hunk.diff_base_byte_range.to_point(&base_buffer),
                                 ),
                                 status: Some(DiffHunkStatus::deleted(hunk.secondary_status)),
-                                excerpt_info: Some(excerpt.info(cx)),
+                                excerpt_range: Some(excerpt.range),
+                                excerpt_path_key_index: Some(excerpt.path_key_index),
                             });
                         }
 
@@ -2727,7 +2722,8 @@ impl ReferenceMultibuffer {
                             range,
                             buffer_range: Some((offset..hunk_range.end).to_point(&buffer)),
                             status: Some(DiffHunkStatus::added(hunk.secondary_status)),
-                            excerpt_info: Some(excerpt.info(cx)),
+                            excerpt_range: Some(excerpt.range),
+                            excerpt_path_key_index: Some(excerpt.path_key_index),
                         };
                         offset = hunk_range.end;
                         regions.push(region);
@@ -2743,7 +2739,8 @@ impl ReferenceMultibuffer {
                     range: len..text.len(),
                     buffer_range: Some((offset..buffer_range.end).to_point(&buffer)),
                     status: None,
-                    excerpt_info: Some(excerpt.info(cx)),
+                    excerpt_range: Some(excerpt.range),
+                    excerpt_path_key_index: Some(excerpt.path_key_index),
                 });
             }
         }
@@ -2755,7 +2752,8 @@ impl ReferenceMultibuffer {
                 range: 0..1,
                 buffer_range: Some(Point::new(0, 0)..Point::new(0, 1)),
                 status: None,
-                excerpt_info: None,
+                excerpt_range: None,
+                excerpt_path_key_index: None,
             });
         } else {
             text.pop();
@@ -2779,13 +2777,13 @@ impl ReferenceMultibuffer {
                         let main_buffer = self
                             .excerpts
                             .iter()
-                            .find(|e| e.info(cx) == region.excerpt_info.clone().unwrap())
+                            .find(|e| e.range == region.excerpt_range.clone().unwrap())
                             .map(|e| e.buffer.clone());
                         let is_excerpt_start = region_ix == 0
-                            || &regions[region_ix - 1].excerpt_info != &region.excerpt_info
+                            || &regions[region_ix - 1].excerpt_range != &region.excerpt_range
                             || regions[region_ix - 1].range.is_empty();
                         let mut is_excerpt_end = region_ix == regions.len() - 1
-                            || &regions[region_ix + 1].excerpt_info != &region.excerpt_info;
+                            || &regions[region_ix + 1].excerpt_range != &region.excerpt_range;
                         let is_start = !text[region.range.start..ix].contains('\n');
                         let mut is_end = if region.range.end > text.len() {
                             !text[ix..].contains('\n')
@@ -2799,7 +2797,7 @@ impl ReferenceMultibuffer {
                             && !text[ix..].contains("\n")
                             && (region.status == Some(DiffHunkStatus::added_none())
                                 || region.status.is_some_and(|s| s.is_deleted()))
-                            && regions[region_ix + 1].excerpt_info == region.excerpt_info
+                            && regions[region_ix + 1].excerpt_range == region.excerpt_range
                             && regions[region_ix + 1].range.start == text.len()
                         {
                             is_end = true;
@@ -2831,12 +2829,18 @@ impl ReferenceMultibuffer {
                             wrapped_buffer_row: None,
 
                             multibuffer_row: Some(multibuffer_row),
-                            expand_info: expand_direction.zip(region.excerpt_info.clone()).map(
-                                |(direction, excerpt_info)| ExpandInfo {
+                            expand_info: maybe!({
+                                let direction = expand_direction?;
+                                let excerpt_range = region.excerpt_range?;
+                                let path_key_index = region.excerpt_path_key_index?;
+                                Some(ExpandInfo {
                                     direction,
-                                    start_anchor: excerpt_info.start_anchor(),
-                                },
-                            ),
+                                    start_anchor: Anchor::in_buffer(
+                                        path_key_index,
+                                        excerpt_range.start,
+                                    ),
+                                })
+                            }),
                         }
                     });
                 ix += line.len() + 1;
@@ -3018,14 +3022,6 @@ async fn test_random_multibuffer(cx: &mut TestAppContext, mut rng: StdRng) {
                 multibuffer.update(cx, |multibuffer, cx| {
                     let snapshot = multibuffer.snapshot(cx);
                     let infos = snapshot.excerpts().collect::<Vec<_>>();
-                    dbg!(&infos);
-                    dbg!(
-                        &reference
-                            .excerpts
-                            .iter()
-                            .map(|excerpt| excerpt.info(cx))
-                            .collect::<Vec<_>>()
-                    );
                     let mut excerpts = HashSet::default();
                     for _ in 0..rng.random_range(0..infos.len()) {
                         excerpts.extend(infos.choose(&mut rng).cloned());

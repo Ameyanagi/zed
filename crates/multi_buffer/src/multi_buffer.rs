@@ -93,64 +93,6 @@ pub struct MultiBuffer {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PathKeyIndex(u64);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ExcerptInfo {
-    path_key_index: PathKeyIndex,
-    pub buffer_id: BufferId,
-    pub range: ExcerptRange<text::Anchor>,
-}
-
-impl ExcerptInfo {
-    pub fn end_anchor(&self) -> Anchor {
-        Anchor::in_buffer(self.path_key_index, self.range.context.end)
-    }
-
-    pub fn start_anchor(&self) -> Anchor {
-        Anchor::in_buffer(self.path_key_index, self.range.context.start)
-    }
-
-    pub fn buffer(&self, multibuffer: &MultiBuffer) -> Entity<Buffer> {
-        let buffer_state = multibuffer
-            .buffers
-            .get(&self.buffer_id)
-            .expect("excerpt from nonexistent buffer");
-
-        buffer_state.buffer.clone()
-    }
-
-    pub fn buffer_snapshot<'a>(&self, multibuffer: &'a MultiBufferSnapshot) -> &'a BufferSnapshot {
-        let buffer_state_snapshot = multibuffer
-            .buffers
-            .get(&self.buffer_id)
-            .expect("excerpt from nonexistent buffer");
-
-        if cfg!(debug_assertions) {
-            debug_assert_eq!(
-                Some(&buffer_state_snapshot.path_key),
-                multibuffer.path_keys_by_index.get(&self.path_key_index)
-            );
-        }
-
-        &buffer_state_snapshot.buffer_snapshot
-    }
-
-    pub fn multibuffer_range(&self) -> Range<Anchor> {
-        Anchor::range_in_buffer(self.path_key_index, self.range.context.clone())
-    }
-
-    pub fn buffer_range(&self) -> Range<text::Anchor> {
-        self.range.context.clone()
-    }
-
-    pub fn anchor_range(&self, range: Range<text::Anchor>) -> Range<Anchor> {
-        Anchor::range_in_buffer(self.path_key_index, range)
-    }
-
-    pub fn anchor(&self, position: text::Anchor) -> Anchor {
-        Anchor::in_buffer(self.path_key_index, position)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     BufferRangesUpdated {
@@ -1901,33 +1843,26 @@ impl MultiBuffer {
         let buffer_snapshot = buffer.read(cx).snapshot();
         let text_anchor = buffer_snapshot.anchor_after(&point);
         let snapshot = self.snapshot(cx);
+        let path_key_index = snapshot.path_key_index_for_buffer(buffer_snapshot.remote_id())?;
         for excerpt in snapshot.excerpts_for_buffer(buffer_snapshot.remote_id()) {
             if excerpt
-                .range
                 .context
                 .start
                 .cmp(&text_anchor, &buffer_snapshot)
                 .is_gt()
             {
-                found = Some(Anchor::in_buffer(
-                    excerpt.path_key_index,
-                    excerpt.range.context.start,
-                ));
+                found = Some(Anchor::in_buffer(path_key_index, excerpt.context.start));
                 break;
             } else if excerpt
-                .range
                 .context
                 .end
                 .cmp(&text_anchor, &buffer_snapshot)
                 .is_ge()
             {
-                found = Some(Anchor::in_buffer(excerpt.path_key_index, text_anchor));
+                found = Some(Anchor::in_buffer(path_key_index, text_anchor));
                 break;
             }
-            found = Some(Anchor::in_buffer(
-                excerpt.path_key_index,
-                excerpt.range.context.end,
-            ));
+            found = Some(Anchor::in_buffer(path_key_index, excerpt.context.end));
         }
 
         found
@@ -3812,7 +3747,7 @@ impl MultiBufferSnapshot {
             + AddAssign<MBD::TextDimension>
             + Ord,
     {
-        let mut current_excerpt_metadata: Option<(ExcerptInfo, I)> = None;
+        let mut current_excerpt_metadata: Option<(ExcerptRange<text::Anchor>, I)> = None;
         let mut cursor = self.cursor::<MBD, MBD::TextDimension>();
 
         // Find the excerpt and buffer offset where the given range ends.
@@ -3827,7 +3762,7 @@ impl MultiBufferSnapshot {
                     <MBD::TextDimension>::default()
                 };
                 buffer_end = buffer_end + overshoot;
-                range_end = Some((region.excerpt.info(), buffer_end));
+                range_end = Some((region.excerpt.range.clone(), buffer_end));
                 break;
             }
             cursor.next();
@@ -3857,7 +3792,7 @@ impl MultiBufferSnapshot {
                 // If we have already retrieved metadata for this excerpt, continue to use it.
                 let metadata_iter = if let Some((_, metadata)) = current_excerpt_metadata
                     .as_mut()
-                    .filter(|(excerpt_info, _)| excerpt_info == &excerpt.info())
+                    .filter(|(excerpt_info, _)| excerpt_info == &excerpt.range)
                 {
                     Some(metadata)
                 }
@@ -3882,7 +3817,7 @@ impl MultiBufferSnapshot {
                         .end
                         .summary::<MBD::TextDimension>(&buffer_snapshot);
                     if let Some((end_excerpt, end_buffer_offset)) = &range_end
-                        && &excerpt.info() == end_excerpt
+                        && &excerpt.range == end_excerpt
                     {
                         buffer_end = buffer_end.min(*end_buffer_offset);
                     }
@@ -3890,7 +3825,7 @@ impl MultiBufferSnapshot {
                     get_buffer_metadata(&buffer_snapshot, buffer_start..buffer_end).map(
                         |iterator| {
                             &mut current_excerpt_metadata
-                                .insert((excerpt.info(), iterator))
+                                .insert((excerpt.range.clone(), iterator))
                                 .1
                         },
                     )
@@ -3958,7 +3893,7 @@ impl MultiBufferSnapshot {
                 else {
                     current_excerpt_metadata.take();
                     if let Some((end_excerpt, _)) = &range_end
-                        && &excerpt.info() == end_excerpt
+                        && &excerpt.range == end_excerpt
                     {
                         return None;
                     }
@@ -5169,7 +5104,10 @@ impl MultiBufferSnapshot {
         })
     }
 
-    pub fn excerpts_for_buffer(&self, buffer_id: BufferId) -> impl Iterator<Item = ExcerptInfo> {
+    pub fn excerpts_for_buffer(
+        &self,
+        buffer_id: BufferId,
+    ) -> impl Iterator<Item = ExcerptRange<text::Anchor>> {
         if let Some(buffer_state) = self.buffers.get(&buffer_id) {
             let path_key = buffer_state.path_key.clone();
             let mut cursor = self.excerpts.cursor::<PathKey>(());
@@ -5180,7 +5118,7 @@ impl MultiBufferSnapshot {
                     return None;
                 }
                 cursor.next();
-                Some(excerpt.info())
+                Some(excerpt.range.clone())
             }))
         } else {
             None
@@ -6626,12 +6564,12 @@ impl MultiBufferSnapshot {
     fn excerpts_for_path<'a>(
         &'a self,
         path_key: &'a PathKey,
-    ) -> impl Iterator<Item = ExcerptInfo> + 'a {
+    ) -> impl Iterator<Item = ExcerptRange<text::Anchor>> + 'a {
         let mut cursor = self.excerpts.cursor::<ExcerptSummary>(());
         cursor.seek(path_key, Bias::Left);
         cursor
             .take_while(move |item| &item.path_key == path_key)
-            .map(|excerpt| excerpt.info())
+            .map(|excerpt| excerpt.range.clone())
     }
 
     /// If the given multibuffer range is contained in a single excerpt and contains no deleted hunks,
@@ -7253,14 +7191,6 @@ impl Excerpt {
         multibuffer
             .buffer(self.buffer_id)
             .expect("buffer entity not found for excerpt")
-    }
-
-    fn info(&self) -> ExcerptInfo {
-        ExcerptInfo {
-            path_key_index: self.path_key_index,
-            buffer_id: self.buffer_id,
-            range: self.range.clone(),
-        }
     }
 
     fn chunks_in_range<'a>(

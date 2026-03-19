@@ -2288,10 +2288,9 @@ impl BlockSnapshot {
             }
             BlockId::FoldedBuffer(buffer_id) => self.wrap_snapshot.make_wrap_point(
                 buffer
-                    .excerpts_for_buffer(buffer_id)
-                    .next()?
-                    .multibuffer_range()
-                    .start
+                    .buffer_anchor_to_anchor(
+                        buffer.excerpts_for_buffer(buffer_id).next()?.context.start,
+                    )?
                     .to_point(buffer),
                 Bias::Left,
             ),
