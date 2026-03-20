@@ -22,12 +22,11 @@ use workspace::Workspace;
 use worktree::Snapshot;
 
 use crate::{
-    DevContainerContext, DevContainerErrorV2, DevContainerFeature, DevContainerTemplate,
-    TemplateEntry,
-    devcontainer_json::{DevContainer, LifecyleScript},
-    devcontainer_templates_repository, download_devcontainer_template_files, get_ghcr_token,
-    get_latest_feature_manifest, get_latest_manifest, get_latest_manifest_for_id, ghcr_url,
+    DevContainerContext, DevContainerFeature, DevContainerTemplate,
+    devcontainer_json::DevContainer,
+    devcontainer_templates_repository, get_latest_oci_manifest, get_oci_token, ghcr_registry,
     model::{read_devcontainer_configuration, spawn_dev_container},
+    oci::download_oci_tarball,
 };
 
 /// Represents a discovered devcontainer configuration
@@ -575,59 +574,58 @@ pub(crate) async fn apply_dev_container_template_v2(
     context: &DevContainerContext,
     cx: &mut AsyncWindowContext,
 ) -> Result<DevContainerApplyV2, DevContainerError> {
-    let token = get_ghcr_token(&context.http_client)
-        .map_err(|e| {
-            log::error!("TODO {e}");
-            DevContainerError::DevContainerCliNotAvailable
-        })
-        .await?;
-    let manifest = get_latest_manifest_for_id(&template.id, &token.token, &context.http_client)
-        .map_err(|e| {
-            log::error!("TODO {e}");
-            DevContainerError::DevContainerCliNotAvailable
-        })
-        .await?;
+    let token = get_oci_token(
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        &context.http_client,
+    )
+    .map_err(|e| {
+        log::error!("TODO {e}");
+        DevContainerError::DevContainerCliNotAvailable
+    })
+    .await?;
+    let manifest = get_latest_oci_manifest(
+        &token.token,
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        &context.http_client,
+        Some(&template.id),
+    )
+    .map_err(|e| {
+        log::error!("TODO {e}");
+        DevContainerError::DevContainerCliNotAvailable
+    })
+    .await?;
+
+    // TODO unwraps here
     let id: &str = &template.id;
     let token: &str = &token.token;
     let blob_digest: &str = &manifest.layers[0].digest;
     let client = &context.http_client;
-    let url = format!(
-        "{}/v2/{}/{}/blobs/{}",
-        ghcr_url(),
-        devcontainer_templates_repository(),
-        id,
-        blob_digest
-    );
-    dbg!(&url, token);
-    let request = Request::get(url)
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Accept", "application/vnd.oci.image.manifest.v1+json")
-        .body(AsyncBody::default())
-        .unwrap();
     let temp_dir = tempfile::Builder::new().tempdir().unwrap();
-    let target_path = temp_dir.path().join("downloadme.tar");
-    let mut target_file = File::create(&target_path).await.unwrap();
     let extracted = temp_dir.path().join("extracted");
-    std::fs::create_dir(&extracted).unwrap();
-    let Ok(mut response) = client.send(request).await else {
-        log::error!("Failed get reponse - TODO fix error handling");
-        return Err(DevContainerError::DevContainerCliNotAvailable); // TODO
-    };
-    smol::io::copy(response.body_mut(), &mut target_file)
-        .await
-        .unwrap();
-    let command_output = Command::new("tar")
-        .arg("-xvf")
-        .arg(&target_path)
-        .arg("-C")
-        .arg(&extracted)
-        .output()
-        .await
-        .unwrap();
-    dbg!(&command_output);
-    let extracted_location = &extracted.join(".devcontainer/");
+    context.fs.create_dir(&extracted).await.unwrap();
+
+    download_oci_tarball(
+        token,
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        blob_digest,
+        "application/vnd.oci.image.manifest.v1+json",
+        &extracted,
+        client,
+        &context.fs,
+        Some(id),
+    )
+    .map_err(|e| {
+        log::error!("Error downloading tarball: {:?}", e);
+        DevContainerError::DevContainerNotFound
+    })
+    .await?;
+
+    let downloaded_devcontainer_folder = &extracted.join(".devcontainer/");
     let mut project_files = Vec::new();
-    for entry in WalkDir::new(extracted_location) {
+    for entry in WalkDir::new(downloaded_devcontainer_folder) {
         let entry = entry.unwrap();
         if !entry.file_type().is_file() {
             continue;
@@ -650,7 +648,7 @@ pub(crate) async fn apply_dev_container_template_v2(
         project_files.push(rel_path);
     }
 
-    dbg!(&extracted_location);
+    dbg!(&downloaded_devcontainer_folder);
 
     Ok(DevContainerApplyV2 { project_files })
 }

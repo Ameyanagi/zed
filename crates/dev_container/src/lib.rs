@@ -57,13 +57,16 @@ mod devcontainer_json;
 mod docker;
 mod features;
 mod model;
+mod oci;
 
 use devcontainer_api::ensure_devcontainer_cli;
 use devcontainer_api::read_default_devcontainer_configuration;
 
 use crate::devcontainer_api::DevContainerError;
-use crate::devcontainer_api::apply_dev_container_template;
 use crate::devcontainer_api::apply_dev_container_template_v2;
+use crate::oci::get_deserializable_oci_blob;
+use crate::oci::get_latest_oci_manifest;
+use crate::oci::get_oci_token;
 
 pub use devcontainer_api::{
     DevContainerConfig, find_configs_in_snapshot, find_devcontainer_configs,
@@ -1127,7 +1130,7 @@ impl StatefulModal for DevContainerModal {
                     let Ok(client) = cx.update(|_, cx| cx.http_client()) else {
                         return;
                     };
-                    match get_templates(client).await {
+                    match get_ghcr_templates(client).await {
                         Ok(templates) => {
                             let message =
                                 DevContainerMessage::TemplatesRetrieved(templates.templates);
@@ -1293,7 +1296,7 @@ impl StatefulModal for DevContainerModal {
                     let Ok(client) = cx.update(|_, cx| cx.http_client()) else {
                         return;
                     };
-                    let Some(features) = get_features(client).await.log_err() else {
+                    let Some(features) = get_ghcr_features(client).await.log_err() else {
                         return;
                     };
                     let message = DevContainerMessage::FeaturesRetrieved(features.features);
@@ -1412,17 +1415,7 @@ trait StatefulModal: ModalView + EventEmitter<DismissEvent> + Render {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GithubTokenResponse {
-    pub(crate) token: String,
-}
-
-fn ghcr_url() -> &'static str {
-    "https://ghcr.io"
-}
-
-fn ghcr_domain() -> &'static str {
+fn ghcr_registry() -> &'static str {
     "ghcr.io"
 }
 
@@ -1434,11 +1427,6 @@ fn devcontainer_features_repository() -> &'static str {
     "devcontainers/features"
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ManifestLayer {
-    pub(crate) digest: String,
-}
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct TemplateOptions {
@@ -1491,12 +1479,6 @@ impl TemplateOptions {
             }
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DockerManifestsResponse {
-    pub(crate) layers: Vec<ManifestLayer>,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Hash)]
@@ -1640,118 +1622,82 @@ fn dispatch_apply_templates(
     .detach();
 }
 
-async fn get_templates(
+async fn get_ghcr_templates(
     client: Arc<dyn HttpClient>,
 ) -> Result<DevContainerTemplatesResponse, String> {
-    let token = get_ghcr_token(&client).await?;
-    let manifest = get_latest_manifest(&token.token, &client).await?;
+    let token = get_oci_token(
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        &client,
+    )
+    .await?;
+    let manifest = get_latest_oci_manifest(
+        &token.token,
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        &client,
+        None,
+    )
+    .await?;
 
-    let mut template_response =
-        get_devcontainer_templates(&token.token, &manifest.layers[0].digest, &client).await?;
+    let mut template_response: DevContainerTemplatesResponse = get_deserializable_oci_blob(
+        &token.token,
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        &manifest.layers[0].digest,
+        &client,
+    )
+    .await?;
 
     for template in &mut template_response.templates {
         template.source_repository = Some(format!(
             "{}/{}",
-            ghcr_domain(),
+            ghcr_registry(),
             devcontainer_templates_repository()
         ));
     }
     Ok(template_response)
 }
 
-async fn get_features(client: Arc<dyn HttpClient>) -> Result<DevContainerFeaturesResponse, String> {
-    let token = get_ghcr_token(&client).await?;
-    let manifest = get_latest_feature_manifest(&token.token, &client).await?;
+async fn get_ghcr_features(
+    client: Arc<dyn HttpClient>,
+) -> Result<DevContainerFeaturesResponse, String> {
+    let token = get_oci_token(
+        ghcr_registry(),
+        devcontainer_templates_repository(),
+        &client,
+    )
+    .await?;
 
-    let mut features_response =
-        get_devcontainer_features(&token.token, &manifest.layers[0].digest, &client).await?;
+    let manifest = get_latest_oci_manifest(
+        &token.token,
+        ghcr_registry(),
+        devcontainer_features_repository(),
+        &client,
+        None,
+    )
+    .await?;
+
+    let mut features_response: DevContainerFeaturesResponse = get_deserializable_oci_blob(
+        &token.token,
+        ghcr_registry(),
+        devcontainer_features_repository(),
+        &manifest.layers[0].digest,
+        &client,
+    )
+    .await?;
 
     for feature in &mut features_response.features {
         feature.source_repository = Some(format!(
             "{}/{}",
-            ghcr_domain(),
+            ghcr_registry(),
             devcontainer_features_repository()
         ));
     }
     Ok(features_response)
 }
 
-async fn get_ghcr_token(client: &Arc<dyn HttpClient>) -> Result<GithubTokenResponse, String> {
-    let url = format!(
-        "{}/token?service=ghcr.io&scope=repository:{}:pull",
-        ghcr_url(),
-        devcontainer_templates_repository()
-    );
-    get_deserialized_response("", &url, client).await
-}
-
-async fn get_latest_feature_manifest(
-    token: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<DockerManifestsResponse, String> {
-    let url = format!(
-        "{}/v2/{}/manifests/latest",
-        ghcr_url(),
-        devcontainer_features_repository()
-    );
-    get_deserialized_response(token, &url, client).await
-}
-
-async fn get_latest_manifest(
-    token: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<DockerManifestsResponse, String> {
-    let url = format!(
-        "{}/v2/{}/manifests/latest",
-        ghcr_url(),
-        devcontainer_templates_repository()
-    );
-    get_deserialized_response(token, &url, client).await
-}
-
-async fn get_latest_manifest_for_id(
-    id: &str,
-    token: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<DockerManifestsResponse, String> {
-    let url = format!(
-        "{}/v2/{}/{}/manifests/latest",
-        ghcr_url(),
-        devcontainer_templates_repository(),
-        id
-    );
-    dbg!(&url, token);
-    get_deserialized_response(token, &url, client).await
-}
-
-async fn get_devcontainer_features(
-    token: &str,
-    blob_digest: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<DevContainerFeaturesResponse, String> {
-    let url = format!(
-        "{}/v2/{}/blobs/{}",
-        ghcr_url(),
-        devcontainer_features_repository(),
-        blob_digest
-    );
-    get_deserialized_response(token, &url, client).await
-}
-
-async fn get_devcontainer_templates(
-    token: &str,
-    blob_digest: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<DevContainerTemplatesResponse, String> {
-    let url = format!(
-        "{}/v2/{}/blobs/{}",
-        ghcr_url(),
-        devcontainer_templates_repository(),
-        blob_digest
-    );
-    get_deserialized_response(token, &url, client).await
-}
-
+// This got inlined but keeping it around for a sec
 pub(crate) async fn download_devcontainer_template_files(
     id: &str,
     token: &str,
@@ -1761,8 +1707,8 @@ pub(crate) async fn download_devcontainer_template_files(
     cx: &mut AsyncWindowContext,
 ) -> Result<PathBuf, DevContainerErrorV2> {
     let url = format!(
-        "{}/v2/{}/{}/blobs/{}",
-        ghcr_url(),
+        "https://{}/v2/{}/{}/blobs/{}",
+        ghcr_registry(),
         devcontainer_templates_repository(),
         id,
         blob_digest
@@ -1781,6 +1727,7 @@ pub(crate) async fn download_devcontainer_template_files(
     let mut target_file = File::create(&target_path).await.unwrap();
     let extracted = temp_dir.path().join("extracted");
     std::fs::create_dir(&extracted).unwrap();
+
     let Ok(mut response) = client.send(request).await else {
         log::error!("Failed get reponse - TODO fix error handling");
         return Err(DevContainerErrorV2::UnmappedError);
@@ -1826,205 +1773,14 @@ pub(crate) async fn download_devcontainer_template_files(
     Ok(extracted_location.clone())
 }
 
-async fn get_deserialized_response<T>(
-    token: &str,
-    url: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<T, String>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let request = match Request::get(url)
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Accept", "application/vnd.oci.image.manifest.v1+json")
-        .body(AsyncBody::default())
-    {
-        Ok(request) => request,
-        Err(e) => return Err(format!("Failed to create request: {}", e)),
-    };
-    let response = match client.send(request).await {
-        Ok(response) => response,
-        Err(e) => {
-            return Err(format!("Failed to send request to {}: {}", url, e));
-        }
-    };
-
-    let status = response.status();
-    let mut output = String::new();
-
-    if let Err(e) = response.into_body().read_to_string(&mut output).await {
-        return Err(format!("Failed to read response body from {}: {}", url, e));
-    };
-
-    log::info!(
-        "OCI response from {}: status={}, body_len={}, body_preview={}",
-        url,
-        status.as_u16(),
-        output.len(),
-        &output[..output.len().min(200)],
-    );
-
-    if !status.is_success() {
-        return Err(format!(
-            "OCI request to {} returned HTTP {}: {}",
-            url,
-            status.as_u16(),
-            &output[..output.len().min(500)],
-        ));
-    }
-
-    match serde_json_lenient::from_str(&output) {
-        Ok(response) => Ok(response),
-        Err(e) => Err(format!(
-            "Failed to deserialize response from {}: {} (body: {})",
-            url,
-            e,
-            &output[..output.len().min(500)],
-        )),
-    }
-}
-
-/// Gets a bearer token for pulling from a container registry repository.
-///
-/// This uses the registry's `/token` endpoint directly, which works for
-/// `ghcr.io` and other registries that follow the same convention.  For
-/// registries that require a full `WWW-Authenticate` negotiation flow this
-/// would need to be extended.
-pub(crate) async fn get_oci_token_for_repo(
-    registry: &str,
-    repository_path: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<String, String> {
-    let url = format!(
-        "https://{registry}/token?service={registry}&scope=repository:{repository_path}:pull",
-    );
-    log::info!("Fetching OCI token from: {}", url);
-    let token_response: GithubTokenResponse = get_deserialized_response("", &url, client)
-        .await
-        .map_err(|e| {
-            log::error!("OCI token request failed for {}: {e}", url);
-            e
-        })?;
-    log::info!(
-        "Got OCI token for {}: {}...{}",
-        repository_path,
-        &token_response.token[..token_response.token.len().min(12)],
-        &token_response.token[token_response.token.len().saturating_sub(4)..],
-    );
-    Ok(token_response.token)
-}
-
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
     use http_client::{FakeHttpClient, anyhow};
 
     use crate::{
-        GithubTokenResponse, devcontainer_templates_repository, get_deserialized_response,
-        get_devcontainer_templates, get_ghcr_token, get_latest_manifest,
+        DevContainerTemplatesResponse, devcontainer_templates_repository,
+        get_deserializable_oci_blob, ghcr_registry,
     };
-
-    #[gpui::test]
-    async fn test_get_deserialized_response(_cx: &mut TestAppContext) {
-        let client = FakeHttpClient::create(|_request| async move {
-            Ok(http_client::Response::builder()
-                .status(200)
-                .body("{ \"token\": \"thisisatoken\" }".into())
-                .unwrap())
-        });
-
-        let response =
-            get_deserialized_response::<GithubTokenResponse>("", "https://ghcr.io/token", &client)
-                .await;
-        assert!(response.is_ok());
-        assert_eq!(response.unwrap().token, "thisisatoken".to_string())
-    }
-
-    #[gpui::test]
-    async fn test_get_ghcr_token() {
-        let client = FakeHttpClient::create(|request| async move {
-            let host = request.uri().host();
-            if host.is_none() || host.unwrap() != "ghcr.io" {
-                return Err(anyhow!("Unexpected host: {}", host.unwrap_or_default()));
-            }
-            let path = request.uri().path();
-            if path != "/token" {
-                return Err(anyhow!("Unexpected path: {}", path));
-            }
-            let query = request.uri().query();
-            if query.is_none()
-                || query.unwrap()
-                    != format!(
-                        "service=ghcr.io&scope=repository:{}:pull",
-                        devcontainer_templates_repository()
-                    )
-            {
-                return Err(anyhow!("Unexpected query: {}", query.unwrap_or_default()));
-            }
-            Ok(http_client::Response::builder()
-                .status(200)
-                .body("{ \"token\": \"thisisatoken\" }".into())
-                .unwrap())
-        });
-
-        let response = get_ghcr_token(&client).await;
-        assert!(response.is_ok());
-        assert_eq!(response.unwrap().token, "thisisatoken".to_string());
-    }
-
-    #[gpui::test]
-    async fn test_get_latest_manifests() {
-        let client = FakeHttpClient::create(|request| async move {
-            let host = request.uri().host();
-            if host.is_none() || host.unwrap() != "ghcr.io" {
-                return Err(anyhow!("Unexpected host: {}", host.unwrap_or_default()));
-            }
-            let path = request.uri().path();
-            if path
-                != format!(
-                    "/v2/{}/manifests/latest",
-                    devcontainer_templates_repository()
-                )
-            {
-                return Err(anyhow!("Unexpected path: {}", path));
-            }
-            Ok(http_client::Response::builder()
-                .status(200)
-                .body("{
-                    \"schemaVersion\": 2,
-                    \"mediaType\": \"application/vnd.oci.image.manifest.v1+json\",
-                    \"config\": {
-                        \"mediaType\": \"application/vnd.devcontainers\",
-                        \"digest\": \"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",
-                        \"size\": 2
-                    },
-                    \"layers\": [
-                        {
-                            \"mediaType\": \"application/vnd.devcontainers.collection.layer.v1+json\",
-                            \"digest\": \"sha256:035e9c9fd9bd61f6d3965fa4bf11f3ddfd2490a8cf324f152c13cc3724d67d09\",
-                            \"size\": 65235,
-                            \"annotations\": {
-                                \"org.opencontainers.image.title\": \"devcontainer-collection.json\"
-                            }
-                        }
-                    ],
-                    \"annotations\": {
-                        \"com.github.package.type\": \"devcontainer_collection\"
-                    }
-                }".into())
-                .unwrap())
-        });
-
-        let response = get_latest_manifest("", &client).await;
-        assert!(response.is_ok());
-        let response = response.unwrap();
-
-        assert_eq!(response.layers.len(), 1);
-        assert_eq!(
-            response.layers[0].digest,
-            "sha256:035e9c9fd9bd61f6d3965fa4bf11f3ddfd2490a8cf324f152c13cc3724d67d09"
-        );
-    }
 
     #[gpui::test]
     async fn test_get_devcontainer_templates() {
@@ -2091,8 +1847,10 @@ mod tests {
                 }".into())
                 .unwrap())
         });
-        let response = get_devcontainer_templates(
+        let response: Result<DevContainerTemplatesResponse, String> = get_deserializable_oci_blob(
             "",
+            ghcr_registry(),
+            devcontainer_templates_repository(),
             "sha256:035e9c9fd9bd61f6d3965fa4bf11f3ddfd2490a8cf324f152c13cc3724d67d09",
             &client,
         )

@@ -7,9 +7,10 @@ use serde::Deserialize;
 use serde_json_lenient::Value;
 
 use crate::{
-    DevContainerErrorV2, DockerManifestsResponse,
+    DevContainerErrorV2,
     devcontainer_json::{FeatureOptions, MountDefinition},
-    get_deserialized_response, safe_id_upper,
+    oci::{DockerManifestsResponse, get_deserialized_response},
+    safe_id_upper,
 };
 
 /// Parsed components of an OCI feature reference such as
@@ -143,136 +144,10 @@ impl FeatureManifest {
     pub(crate) fn entrypoint(&self) -> Option<String> {
         self.feature_json.entrypoint.clone()
     }
-}
 
-/// Downloads an OCI blob (feature tarball) and extracts it into `dest_dir`.
-///
-/// The blob is expected to be a gzip-compressed tar archive containing the
-/// feature's `install.sh`, `devcontainer-feature.json`, and any other files.
-pub(crate) async fn download_and_extract_oci_feature(
-    feature_ref: &OciFeatureRef,
-    layer_digest: &str,
-    token: &str,
-    dest_dir: &PathBuf,
-    client: &Arc<dyn HttpClient>,
-) -> Result<FeatureManifest, String> {
-    let url = format!(
-        "https://{}/v2/{}/blobs/{}",
-        feature_ref.registry, feature_ref.path, layer_digest,
-    );
-    log::info!(
-        "Downloading OCI blob for feature '{}': {}",
-        feature_ref.id,
-        url
-    );
-
-    let request = Request::get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Accept", "application/vnd.devcontainers.layer.v1+tar")
-        .body(AsyncBody::default())
-        .map_err(|e| format!("Failed to create blob request: {e}"))?;
-
-    let response = client
-        .send(request)
-        .await
-        .map_err(|e| format!("Failed to download feature blob: {e}"))?;
-
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("<none>")
-        .to_string();
-    log::info!(
-        "OCI blob response for '{}': status={}, content-type={}",
-        feature_ref.id,
-        status.as_u16(),
-        content_type,
-    );
-
-    // Read the entire body into memory so we can inspect it before feeding
-    // it to the gzip decoder.
-    let mut body_bytes = Vec::new();
-    response
-        .into_body()
-        .read_to_end(&mut body_bytes)
-        .await
-        .map_err(|e| format!("Failed to read feature blob body: {e}"))?;
-
-    log::info!(
-        "OCI blob body for '{}': {} bytes, first 16 bytes: {:02x?}",
-        feature_ref.id,
-        body_bytes.len(),
-        &body_bytes[..body_bytes.len().min(16)],
-    );
-
-    if !status.is_success() {
-        let body_text = String::from_utf8_lossy(&body_bytes);
-        return Err(format!(
-            "Feature blob download returned HTTP {}: {}",
-            status.as_u16(),
-            body_text,
-        ));
+    pub(crate) fn file_path(&self) -> PathBuf {
+        self.file_path.clone()
     }
-
-    // Per the dev container features distribution spec, feature layers use
-    // media type `application/vnd.devcontainers.layer.v1+tar` (plain tar).
-    // https://containers.dev/implementors/features-distribution/#oci-registry
-    let cursor = futures::io::Cursor::new(body_bytes);
-    let archive = async_tar::Archive::new(cursor);
-    archive
-        .unpack(dest_dir)
-        .await
-        .map_err(|e| format!("Failed to extract feature tarball: {e}"))?;
-
-    let json_path = dest_dir.join("devcontainer-feature.json");
-    if !json_path.exists() {
-        let message = format!(
-            "No devcontainer-feature.json found in {:?}, no defaults to apply",
-            dest_dir
-        );
-        log::error!("{}", &message);
-        return Err(message);
-    }
-
-    let contents = std::fs::read_to_string(&json_path)
-        .map_err(|e| format!("error reading devcontainer-feature.json: {:?}", e))?;
-
-    let feature_json: DevContainerFeatureJson = serde_json_lenient::from_str(&contents)
-        .map_err(|e| format!("Failed to parse devcontainer-feature.json: {e}"))?;
-
-    Ok(FeatureManifest::new(dest_dir.clone(), feature_json))
-}
-
-/// Fetches the OCI manifest for a feature, returning its layer descriptors.
-pub(crate) async fn fetch_oci_feature_manifest(
-    feature_ref: &OciFeatureRef,
-    token: &str,
-    client: &Arc<dyn HttpClient>,
-) -> Result<DockerManifestsResponse, String> {
-    let url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        feature_ref.registry, feature_ref.path, feature_ref.version,
-    );
-    log::info!("Fetching OCI manifest from: {}", url);
-    let manifest: DockerManifestsResponse = get_deserialized_response(token, &url, client)
-        .await
-        .map_err(|e| {
-            log::error!("OCI manifest request failed for {}: {e}", url);
-            e
-        })?;
-    log::info!(
-        "OCI manifest for '{}': {} layer(s), digests: {:?}",
-        feature_ref.id,
-        manifest.layers.len(),
-        manifest
-            .layers
-            .iter()
-            .map(|l| &l.digest)
-            .collect::<Vec<_>>(),
-    );
-    Ok(manifest)
 }
 
 /// Parses an OCI feature reference string into its components.

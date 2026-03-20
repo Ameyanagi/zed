@@ -8,6 +8,7 @@ use std::{
 
 use fs::Fs;
 use http_client::HttpClient;
+use project::debugger::session::OutputToken;
 use serde::{Deserialize, Serialize};
 use smol::process::Command;
 use util::ResultExt;
@@ -24,11 +25,10 @@ use crate::{
         DockerInspect, DockerPs, docker_cli, get_remote_dir_from_config, inspect_image,
         run_docker_exec,
     },
-    features::{
-        FeatureManifest, download_and_extract_oci_feature, fetch_oci_feature_manifest,
-        parse_oci_feature_ref,
-    },
-    get_oci_token_for_repo, safe_id_lower,
+    features::{DevContainerFeatureJson, FeatureManifest, parse_oci_feature_ref},
+    get_oci_token,
+    oci::{TokenResponse, download_oci_tarball, get_oci_manifest},
+    safe_id_lower,
 };
 
 /**
@@ -133,13 +133,6 @@ impl DevContainerManifest {
         labels
     }
 
-    // --> (done) ${localEnv:VARIABLE_NAME} -- pull from local env and replace // How are we going to do this?
-    // --> (done) ${localWorkspaceFolder} -- the lcoal project directory full path
-    // --> (done) ${containerWorkspaceFolder} -- the container directory full path (TODO when do I know this?)
-    // --> (done) ${localWorkspaceFolderBasename} -- the local project directory name
-    // --> (done) ${containerWorkspaceFolderBasename} -- the container directory name
-    // --> (done) ${devcontainerId} -- the hash of what we've been calling "labels" up until now, probably shortened
-    //             - looks like cli pads by 52 chars
     fn parse_nonremote_vars(&mut self) -> Result<(), DevContainerErrorV2> {
         let mut replaced_content = self
             .raw_config
@@ -194,7 +187,6 @@ impl DevContainerManifest {
         }
     }
 
-    // Ugh don't let this out. Needs simplification
     async fn dockerfile_location(&self) -> Option<PathBuf> {
         let dev_container = self.dev_container();
         match dev_container.build_type() {
@@ -354,21 +346,29 @@ impl DevContainerManifest {
                 );
                 DevContainerErrorV2::UnmappedError
             })?;
-            let token = get_oci_token_for_repo(&oci_ref.registry, &oci_ref.path, &self.http_client)
-                .await
-                .map_err(|e| {
-                    log::error!("Failed to get OCI token for feature '{}': {e}", feature_ref);
-                    DevContainerErrorV2::UnmappedError
-                })?;
-            let manifest = fetch_oci_feature_manifest(&oci_ref, &token, &self.http_client)
-                .await
-                .map_err(|e| {
-                    log::error!(
-                        "Failed to fetch OCI manifest for feature '{}': {e}",
-                        feature_ref
-                    );
-                    DevContainerErrorV2::UnmappedError
-                })?;
+            let TokenResponse { token } =
+                get_oci_token(&oci_ref.registry, &oci_ref.path, &self.http_client)
+                    .await
+                    .map_err(|e| {
+                        log::error!("Failed to get OCI token for feature '{}': {e}", feature_ref);
+                        DevContainerErrorV2::UnmappedError
+                    })?;
+            let manifest = get_oci_manifest(
+                &oci_ref.registry,
+                &oci_ref.path,
+                &token,
+                &self.http_client,
+                &oci_ref.version,
+                None,
+            )
+            .await
+            .map_err(|e| {
+                log::error!(
+                    "Failed to fetch OCI manifest for feature '{}': {e}",
+                    feature_ref
+                );
+                DevContainerErrorV2::UnmappedError
+            })?;
             let digest = &manifest
                 .layers
                 .first()
@@ -380,18 +380,41 @@ impl DevContainerManifest {
                     DevContainerErrorV2::UnmappedError
                 })?
                 .digest;
-            let feature_manifest = download_and_extract_oci_feature(
-                &oci_ref,
-                digest,
+            download_oci_tarball(
                 &token,
+                &oci_ref.registry,
+                &oci_ref.path,
+                digest,
+                "application/vnd.devcontainers.layer.v1+tar",
                 &feature_dir,
                 &self.http_client,
+                &self.fs,
+                None,
             )
-            .await
-            .map_err(|e| {
-                log::error!("Failed to download OCI feature '{}': {e}", feature_ref);
+            .await?;
+
+            let feature_json_path = &feature_dir.join("devcontainer-feature.json");
+            if !feature_json_path.exists() {
+                let message = format!(
+                    "No devcontainer-feature.json found in {:?}, no defaults to apply",
+                    feature_json_path
+                );
+                log::error!("{}", &message);
+                return Err(DevContainerErrorV2::UnmappedError);
+            }
+
+            let contents = std::fs::read_to_string(&feature_json_path).map_err(|e| {
+                log::error!("error reading devcontainer-feature.json: {:?}", e);
                 DevContainerErrorV2::UnmappedError
             })?;
+
+            let feature_json: DevContainerFeatureJson = serde_json_lenient::from_str(&contents)
+                .map_err(|e| {
+                    log::error!("Failed to parse devcontainer-feature.json: {e}");
+                    DevContainerErrorV2::UnmappedError
+                })?;
+
+            let feature_manifest = FeatureManifest::new(feature_dir, feature_json);
 
             log::info!("Downloaded OCI feature content for '{}'", feature_ref);
 
@@ -401,7 +424,9 @@ impl DevContainerManifest {
 
             self.fs
                 .write(
-                    &feature_dir.join("devcontainer-features-install.sh"),
+                    &feature_manifest
+                        .file_path()
+                        .join("devcontainer-features-install.sh"),
                     &wrapper_content.as_bytes(),
                 )
                 .await
@@ -1197,111 +1222,82 @@ impl DevContainerManifest {
 
         let devcontainer_up = self.run_dev_container(build_resources).await?;
 
-        self.run_remote_scripts(&devcontainer_up).await?;
+        self.run_remote_scripts(&devcontainer_up, true).await?;
 
         Ok(devcontainer_up)
-    }
-
-    async fn run_remote_scripts_running_container(
-        &self,
-        devcontainer_up: &DevContainerUp,
-    ) -> Result<(), DevContainerErrorV2> {
-        let ConfigStatus::VariableParsed(config) = &self.config else {
-            log::error!("Config not yet parsed, cannot proceed with remote scripts");
-            return Err(DevContainerErrorV2::UnmappedError);
-        };
-        let remote_folder = self.remote_workspace_folder()?.display().to_string();
-
-        if let Some(post_attach_command) = &config.post_attach_command {
-            for (command_name, command) in post_attach_command.script_commands() {
-                log::info!("Running post attach command {command_name}");
-                // TODO remote env
-                run_docker_exec(
-                    &devcontainer_up.container_id,
-                    &remote_folder,
-                    &devcontainer_up.remote_user,
-                    &HashMap::new(),
-                    command,
-                )
-                .await?;
-            }
-            // user_scripts.push(post_attach_command.clone());
-        }
-
-        Ok(())
     }
 
     async fn run_remote_scripts(
         &self,
         devcontainer_up: &DevContainerUp,
+        new_container: bool,
     ) -> Result<(), DevContainerErrorV2> {
         let ConfigStatus::VariableParsed(config) = &self.config else {
             log::error!("Config not yet parsed, cannot proceed with remote scripts");
             return Err(DevContainerErrorV2::UnmappedError);
         };
         let remote_folder = self.remote_workspace_folder()?.display().to_string();
-        // let mut system_scripts = Vec::new();
-        if let Some(on_create_command) = &config.on_create_command {
-            for (command_name, command) in on_create_command.script_commands() {
-                log::info!("Running on create command {command_name}");
-                // TODO remote env
-                run_docker_exec(
-                    &devcontainer_up.container_id,
-                    &remote_folder,
-                    "root",
-                    &HashMap::new(),
-                    command,
-                )
-                .await?;
+
+        if new_container {
+            if let Some(on_create_command) = &config.on_create_command {
+                for (command_name, command) in on_create_command.script_commands() {
+                    log::info!("Running on create command {command_name}");
+                    // TODO remote env
+                    run_docker_exec(
+                        &devcontainer_up.container_id,
+                        &remote_folder,
+                        "root",
+                        &HashMap::new(),
+                        command,
+                    )
+                    .await?;
+                }
+            }
+            if let Some(update_content_command) = &config.update_content_command {
+                for (command_name, command) in update_content_command.script_commands() {
+                    log::info!("Running update content command {command_name}");
+                    // TODO remote env
+                    run_docker_exec(
+                        &devcontainer_up.container_id,
+                        &remote_folder,
+                        "root",
+                        &HashMap::new(),
+                        command,
+                    )
+                    .await?;
+                }
             }
 
-            // system_scripts.push(on_create_command.clone());
-        }
-        if let Some(update_content_command) = &config.update_content_command {
-            for (command_name, command) in update_content_command.script_commands() {
-                log::info!("Running update content command {command_name}");
-                // TODO remote env
-                run_docker_exec(
-                    &devcontainer_up.container_id,
-                    &remote_folder,
-                    "root",
-                    &HashMap::new(),
-                    command,
-                )
-                .await?;
+            if let Some(post_create_command) = &config.post_create_command {
+                for (command_name, command) in post_create_command.script_commands() {
+                    log::info!("Running post create command {command_name}");
+                    // TODO remote env
+                    run_docker_exec(
+                        &devcontainer_up.container_id,
+                        &remote_folder,
+                        &devcontainer_up.remote_user,
+                        &HashMap::new(),
+                        command,
+                    )
+                    .await?;
+                }
+                // user_scripts.push(post_create_command.clone());
             }
-            // system_scripts.push(update_content_command.clone());
-        }
-
-        if let Some(post_create_command) = &config.post_create_command {
-            for (command_name, command) in post_create_command.script_commands() {
-                log::info!("Running post create command {command_name}");
-                // TODO remote env
-                run_docker_exec(
-                    &devcontainer_up.container_id,
-                    &remote_folder,
-                    &devcontainer_up.remote_user,
-                    &HashMap::new(),
-                    command,
-                )
-                .await?;
+            if let Some(post_start_command) = &config.post_start_command {
+                for (command_name, command) in post_start_command.script_commands() {
+                    log::info!("Running post start command {command_name}");
+                    // TODO remote env
+                    run_docker_exec(
+                        &devcontainer_up.container_id,
+                        &remote_folder,
+                        &devcontainer_up.remote_user,
+                        &HashMap::new(),
+                        command,
+                    )
+                    .await?;
+                }
+                // user_scripts.push(post_start_command.clone());
             }
-            // user_scripts.push(post_create_command.clone());
-        }
-        if let Some(post_start_command) = &config.post_start_command {
-            for (command_name, command) in post_start_command.script_commands() {
-                log::info!("Running post start command {command_name}");
-                // TODO remote env
-                run_docker_exec(
-                    &devcontainer_up.container_id,
-                    &remote_folder,
-                    &devcontainer_up.remote_user,
-                    &HashMap::new(),
-                    command,
-                )
-                .await?;
-            }
-            // user_scripts.push(post_start_command.clone());
         }
         if let Some(post_attach_command) = &config.post_attach_command {
             for (command_name, command) in post_attach_command.script_commands() {
@@ -1436,15 +1432,12 @@ pub(crate) async fn spawn_dev_container(
         config,
         local_project_path.clone(),
     )
-    .await?; // TODO kill this clone
+    .await?;
     // 2. ensure that object is valid
     devcontainer_manifest.validate_config()?;
 
     // 3. Parse built-in variables
     devcontainer_manifest.parse_nonremote_vars()?;
-
-    // 4. run any initializeCommands
-    log::info!("TODO, run initialze commands");
 
     log::info!("Checking for existing container");
     if let Some(docker_ps) =
@@ -1473,7 +1466,7 @@ pub(crate) async fn spawn_dev_container(
         };
 
         devcontainer_manifest
-            .run_remote_scripts_running_container(&dev_container_up)
+            .run_remote_scripts(&dev_container_up, false)
             .await?;
 
         Ok(dev_container_up)
