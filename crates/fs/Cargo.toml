@@ -45,6 +45,7 @@ trash = { git = "https://github.com/dinocosta/trash-rs", branch = "5039-macos-re
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows.workspace = true
+dunce.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ashpd.workspace = true
