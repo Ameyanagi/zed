@@ -6,9 +6,9 @@ mod transaction;
 
 use self::transaction::History;
 
-pub use anchor::{Anchor, AnchorRangeExt, ExcerptAnchor};
+pub use anchor::{Anchor, AnchorRangeExt};
 
-use anchor::AnchorSeekTarget;
+use anchor::{AnchorSeekTarget, ExcerptAnchor};
 use anyhow::{Result, anyhow};
 use buffer_diff::{
     BufferDiff, BufferDiffEvent, BufferDiffSnapshot, DiffChanged, DiffHunkSecondaryStatus,
@@ -3529,7 +3529,6 @@ impl MultiBufferSnapshot {
         })
     }
 
-    // todo!() repeats ids? seems weird
     pub fn buffer_ids_for_range<T: ToOffset>(
         &self,
         range: Range<T>,

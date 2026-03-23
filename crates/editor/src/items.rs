@@ -519,9 +519,9 @@ fn serialize_anchor(anchor: &Anchor) -> proto::EditorAnchor {
                 buffer_id: None,
             }),
         },
-        Anchor::Excerpt(excerpt_anchor) => proto::EditorAnchor {
+        Anchor::Excerpt(_) => proto::EditorAnchor {
             excerpt_id: None,
-            anchor: Some(serialize_text_anchor(&excerpt_anchor.text_anchor())),
+            anchor: anchor.text_anchor().map(|a| serialize_text_anchor(&a)),
         },
         Anchor::Max => proto::EditorAnchor {
             excerpt_id: None,

@@ -80,11 +80,11 @@ impl From<ExcerptAnchor> for Anchor {
 
 // todo!() make more private
 impl ExcerptAnchor {
-    pub fn buffer_id(&self) -> BufferId {
+    pub(crate) fn buffer_id(&self) -> BufferId {
         self.text_anchor.buffer_id
     }
 
-    pub fn text_anchor(&self) -> text::Anchor {
+    pub(crate) fn text_anchor(&self) -> text::Anchor {
         self.text_anchor
     }
 
@@ -93,7 +93,7 @@ impl ExcerptAnchor {
         self
     }
 
-    pub fn cmp(&self, other: &Self, snapshot: &MultiBufferSnapshot) -> Ordering {
+    pub(crate) fn cmp(&self, other: &Self, snapshot: &MultiBufferSnapshot) -> Ordering {
         let Some(self_path_key) = snapshot.path_keys_by_index.get(&self.path) else {
             panic!("anchor's path was never added to multibuffer")
         };
@@ -263,7 +263,7 @@ impl ExcerptAnchor {
         Self::in_buffer(path, range.start)..Self::in_buffer(path, range.end)
     }
 
-    pub fn diff_base_anchor(&self) -> Option<text::Anchor> {
+    pub(crate) fn diff_base_anchor(&self) -> Option<text::Anchor> {
         self.diff_base_anchor
     }
 }

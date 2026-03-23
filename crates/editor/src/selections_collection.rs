@@ -8,7 +8,7 @@ use collections::HashMap;
 use gpui::Pixels;
 use itertools::Itertools as _;
 use language::{Bias, Point, Selection, SelectionGoal};
-use multi_buffer::{ExcerptAnchor, MultiBufferDimension, MultiBufferOffset};
+use multi_buffer::{MultiBufferDimension, MultiBufferOffset};
 use util::post_inc;
 
 use crate::{

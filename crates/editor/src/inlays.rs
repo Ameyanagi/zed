@@ -20,7 +20,7 @@ pub mod inlay_hints;
 use std::sync::OnceLock;
 
 use gpui::{Context, HighlightStyle, Hsla, Rgba, Task};
-use multi_buffer::{Anchor, ExcerptAnchor};
+use multi_buffer::Anchor;
 use project::{InlayHint, InlayId};
 use text::Rope;
 
