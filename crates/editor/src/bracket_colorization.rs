@@ -44,7 +44,9 @@ impl Editor {
                         .anchor_in_buffer_unchecked(
                             buffer_snapshot.anchor_after(buffer_range.start),
                         )
-                        .and_then(|anchor| multi_buffer_snapshot.excerpt_for_position(anchor))
+                        .and_then(|anchor| {
+                            multi_buffer_snapshot.excerpt_containing(anchor..anchor)
+                        })
                     else {
                         return acc;
                     };

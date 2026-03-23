@@ -3392,7 +3392,7 @@ fn check_multibuffer(
     for i in 0..snapshot.len().0 {
         // todo!() this seems not useful
         let (_, excerpt_range) = snapshot
-            .excerpt_containing2(MultiBufferOffset(i)..MultiBufferOffset(i))
+            .excerpt_containing(MultiBufferOffset(i)..MultiBufferOffset(i))
             .unwrap();
         reference
             .excerpts
@@ -4752,7 +4752,8 @@ fn test_random_chunk_bitmaps_with_diffs(cx: &mut App, mut rng: StdRng) {
     let mut diffs = Vec::new();
 
     multibuffer.update(cx, |multibuffer, cx| {
-        for buffer_id in multibuffer.all_buffer_ids().collect::<Vec<_>>() {
+        let snapshot = multibuffer.snapshot(cx);
+        for buffer_id in snapshot.all_buffer_ids() {
             if rng.random_bool(0.7) {
                 if let Some(buffer_handle) = multibuffer.buffer(buffer_id) {
                     let buffer_text = buffer_handle.read(cx).text();
@@ -5108,12 +5109,9 @@ fn test_excerpts_containment_functions(cx: &mut App) {
             "Expected exactly one excerpt for offset {offset}",
         );
 
-        let (_, excerpt_containing) =
-            snapshot
-                .excerpt_containing2(offset..offset)
-                .expect(&format!(
-                    "Expected excerpt_containing to find excerpt for offset {offset}"
-                ));
+        let (_, excerpt_containing) = snapshot.excerpt_containing(offset..offset).expect(&format!(
+            "Expected excerpt_containing to find excerpt for offset {offset}"
+        ));
 
         assert_eq!(
             excerpts_for_range[0].range, excerpt_containing,
@@ -5124,11 +5122,11 @@ fn test_excerpts_containment_functions(cx: &mut App) {
     //// Test `excerpt_containing` behavior with ranges:
 
     // Ranges intersecting a single-excerpt
-    let (_, containing) = snapshot.excerpt_containing2(p00..p13).unwrap();
+    let (_, containing) = snapshot.excerpt_containing(p00..p13).unwrap();
     assert_eq!(containing, excerpt_1_info);
 
     // Ranges intersecting multiple excerpts (should return None)
-    let containing = snapshot.excerpt_containing2(p20..p40);
+    let containing = snapshot.excerpt_containing(p20..p40);
     assert!(
         containing.is_none(),
         "excerpt_containing should return None for ranges spanning multiple excerpts"

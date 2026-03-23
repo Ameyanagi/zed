@@ -29188,12 +29188,8 @@ async fn test_paste_url_from_other_app_creates_markdown_link_selectively_in_mult
                 Point::new(1, 21)..Point::new(1, 25),
             ])
         });
-        let first_buffer_id = multi_buffer
-            .read(cx)
-            .all_buffer_ids()
-            .into_iter()
-            .next()
-            .unwrap();
+        let snapshot = multi_buffer.read(cx).snapshot(cx);
+        let first_buffer_id = snapshot.all_buffer_ids().next().unwrap();
         let first_buffer = multi_buffer.read(cx).buffer(first_buffer_id).unwrap();
         first_buffer.update(cx, |buffer, cx| {
             buffer.set_language(Some(markdown_language.clone()), cx);

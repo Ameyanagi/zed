@@ -219,7 +219,7 @@ where
                 continue;
             };
             let Some((target_buffer_snapshot, target_excerpt_range)) =
-                target_snapshot.excerpt_for_position(target_position)
+                target_snapshot.excerpt_containing(target_position..target_position)
             else {
                 dbg!("TWO");
                 continue;
@@ -252,7 +252,7 @@ where
         let buffer_point_range = source_range.to_point(&buffer_snapshot);
         let Some((_, source_excerpt_range)) = source_snapshot
             .anchor_in_buffer_unchecked(buffer_snapshot.anchor_after(source_range.start))
-            .and_then(|anchor| source_snapshot.excerpt_for_position(anchor))
+            .and_then(|anchor| source_snapshot.excerpt_containing(anchor..anchor))
         else {
             continue;
         };
@@ -2251,11 +2251,8 @@ mod tests {
                 65..=74 => {
                     log::info!("removing excerpts for a random path");
                     let ids = editor.update(cx, |editor, cx| {
-                        editor
-                            .rhs_multibuffer
-                            .read(cx)
-                            .all_buffer_ids()
-                            .collect::<Vec<_>>()
+                        let snapshot = editor.rhs_multibuffer.read(cx).snapshot(cx);
+                        snapshot.all_buffer_ids().collect::<Vec<_>>()
                     });
                     if let Some(id) = ids.choose(rng) {
                         editor.update(cx, |editor, cx| {

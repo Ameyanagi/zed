@@ -4534,7 +4534,6 @@ impl Editor {
         dismissed
     }
 
-    // FIXME
     fn linked_editing_ranges_for(
         &self,
         query_range: Range<text::Anchor>,
@@ -12979,7 +12978,7 @@ impl Editor {
 
                 // Don't move lines across excerpts
                 if buffer
-                    .excerpt_containing2(insertion_point..range_to_move.end)
+                    .excerpt_containing(insertion_point..range_to_move.end)
                     .is_some()
                 {
                     let text = buffer
@@ -13084,7 +13083,7 @@ impl Editor {
 
                 // Don't move lines across excerpt boundaries
                 if buffer
-                    .excerpt_containing2(range_to_move.start..insertion_point)
+                    .excerpt_containing(range_to_move.start..insertion_point)
                     .is_some()
                 {
                     let mut text = String::from("\n");
@@ -17503,7 +17502,7 @@ impl Editor {
             let multi_buffer = self.buffer.read(cx);
             let snapshot = multi_buffer.snapshot(cx);
             if let Some((buffer_snapshot, excerpt_range)) =
-                snapshot.excerpt_containing2(excerpt_anchor..excerpt_anchor)
+                snapshot.excerpt_containing(excerpt_anchor..excerpt_anchor)
             {
                 let excerpt_end_row =
                     Point::from_anchor(&excerpt_range.context.end, &buffer_snapshot).row;
@@ -19965,9 +19964,8 @@ impl Editor {
                 .is_some();
             has_folds
         } else {
-            let has_folds = self
-                .buffer
-                .read(cx)
+            let snapshot = self.buffer.read(cx).snapshot(cx);
+            let has_folds = snapshot
                 .all_buffer_ids()
                 .any(|buffer_id| self.is_buffer_folded(buffer_id, cx));
             has_folds
@@ -20134,9 +20132,8 @@ impl Editor {
             self.toggle_fold_multiple_buffers = cx.spawn_in(window, async move |editor, cx| {
                 editor
                     .update_in(cx, |editor, _, cx| {
-                        let all_buffer_ids =
-                            editor.buffer.read(cx).all_buffer_ids().collect::<Vec<_>>();
-                        for buffer_id in all_buffer_ids {
+                        let snapshot = editor.buffer.read(cx).snapshot(cx);
+                        for buffer_id in snapshot.all_buffer_ids() {
                             editor.fold_buffer(buffer_id, cx);
                         }
                     })
@@ -20324,9 +20321,8 @@ impl Editor {
             self.toggle_fold_multiple_buffers = cx.spawn(async move |editor, cx| {
                 editor
                     .update(cx, |editor, cx| {
-                        let all_buffer_ids =
-                            editor.buffer.read(cx).all_buffer_ids().collect::<Vec<_>>();
-                        for buffer_id in all_buffer_ids {
+                        let snapshot = editor.buffer.read(cx).snapshot(cx);
+                        for buffer_id in snapshot.all_buffer_ids() {
                             editor.unfold_buffer(buffer_id, cx);
                         }
                     })
@@ -20576,7 +20572,7 @@ impl Editor {
         buffer: &'a MultiBufferSnapshot,
     ) -> impl 'a + Iterator<Item = MultiBufferDiffHunk> {
         ranges.iter().flat_map(move |range| {
-            let end_excerpt = buffer.excerpt_for_position(range.end);
+            let end_excerpt = buffer.excerpt_containing(range.end..range.end);
             let range = range.to_point(buffer);
             let mut peek_end = range.end;
             if range.end.row < buffer.max_row().0 {

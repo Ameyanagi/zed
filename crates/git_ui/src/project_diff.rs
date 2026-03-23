@@ -603,7 +603,7 @@ impl ProjectDiff {
         if !ranges.iter().any(|range| range.start != range.end) {
             selection = false;
             let anchor = editor.selections.newest_anchor().head();
-            if let Some((_, excerpt_range)) = snapshot.excerpt_for_position(anchor)
+            if let Some((_, excerpt_range)) = snapshot.excerpt_containing(anchor..anchor)
                 && let Some(range) = snapshot
                     .anchor_in_buffer_unchecked(excerpt_range.context.start)
                     .zip(snapshot.anchor_in_buffer_unchecked(excerpt_range.context.end))

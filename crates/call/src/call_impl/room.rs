@@ -1196,6 +1196,7 @@ impl Room {
             is_ssh_project: project.read(cx).is_via_remote_server(),
             windows_paths: Some(project.read(cx).path_style(cx) == PathStyle::Windows),
             // TODO we can stop sending this once the minimum collab version is greater than (FIXME fill in version)
+            // FIXME collab bits
             quirks: vec!["new-style-anchors".to_owned()],
         });
 

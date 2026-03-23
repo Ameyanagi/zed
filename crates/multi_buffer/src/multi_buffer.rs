@@ -1649,7 +1649,6 @@ impl MultiBuffer {
 
             cursor.seek(&start, Bias::Left);
             while let Some(excerpt) = cursor.item() {
-                // todo!() method?
                 let excerpt_start =
                     Anchor::in_buffer(excerpt.path_key_index, excerpt.range.context.end);
                 if excerpt_start.cmp(&selection.end, &snapshot).is_gt() {
@@ -1831,7 +1830,6 @@ impl MultiBuffer {
         Some((self.buffers.get(&buffer.remote_id())?.buffer.clone(), point))
     }
 
-    #[deprecated(note = "FIXME")]
     pub fn buffer_point_to_anchor(
         &self,
         // todo(lw): We shouldn't need this?
@@ -2071,11 +2069,6 @@ impl MultiBuffer {
 
     pub fn all_buffers(&self) -> HashSet<Entity<Buffer>> {
         self.all_buffers_iter().collect()
-    }
-
-    // todo!() look at callers who are collecting this, put it on snapshot instead
-    pub fn all_buffer_ids(&self) -> impl Iterator<Item = BufferId> {
-        self.buffers.keys().copied()
     }
 
     pub fn buffer(&self, buffer_id: BufferId) -> Option<Entity<Buffer>> {
@@ -2416,7 +2409,7 @@ impl MultiBuffer {
         let ranges = ranges.iter().map(move |range| {
             let excerpt_end =
                 snapshot
-                    .excerpt_for_position(range.end)
+                    .excerpt_containing(range.end..range.end)
                     .and_then(|(_, excerpt_range)| {
                         snapshot.buffer_anchor_to_anchor(excerpt_range.context.end)
                     });
@@ -3084,7 +3077,7 @@ impl MultiBuffer {
         let snapshot = self.snapshot(cx);
         let excerpt_end =
             snapshot
-                .excerpt_for_position(range.end)
+                .excerpt_containing(range.end..range.end)
                 .and_then(|(_, excerpt_range)| {
                     snapshot.buffer_anchor_to_anchor(excerpt_range.context.end)
                 });
@@ -3223,7 +3216,8 @@ impl MultiBuffer {
 
         let mut buffers = Vec::new();
         for _ in 0..mutation_count {
-            let buffer_ids = self.all_buffer_ids().collect::<Vec<_>>();
+            let snapshot = self.snapshot(cx);
+            let buffer_ids = snapshot.all_buffer_ids().collect::<Vec<_>>();
             if buffer_ids.is_empty() || (rng.random() && buffer_ids.len() < max_buffers) {
                 let buffer_handle = if rng.random() || self.buffers.is_empty() {
                     let text = RandomCharIter::new(&mut *rng).take(10).collect::<String>();
@@ -4049,6 +4043,10 @@ impl MultiBufferSnapshot {
         self.reversed_chars_at(start)
             .next()
             .map(|ch| classifier.kind(ch))
+    }
+
+    pub fn all_buffer_ids(&self) -> impl Iterator<Item = BufferId> + '_ {
+        self.buffers.iter().map(|(id, _)| *id)
     }
 
     pub fn is_singleton(&self) -> bool {
@@ -5551,7 +5549,7 @@ impl MultiBufferSnapshot {
         start.0..end.0
     }
 
-    fn excerpt_containing(
+    fn excerpt_and_offset_for_range(
         &self,
         range: Range<MultiBufferOffset>,
     ) -> Option<(&Excerpt, ExcerptOffset, Range<BufferOffset>)> {
@@ -5598,7 +5596,8 @@ impl MultiBufferSnapshot {
         ) -> Vec<(Range<BufferOffset>, T)>,
     ) -> Option<Vec<(Range<MultiBufferOffset>, T)>> {
         let position = position.start.to_offset(self)..position.end.to_offset(self);
-        let (excerpt, excerpt_start, input_buffer_range) = self.excerpt_containing(position)?;
+        let (excerpt, excerpt_start, input_buffer_range) =
+            self.excerpt_and_offset_for_range(position)?;
         let buffer = excerpt.buffer_snapshot(self);
         let excerpt_buffer_start =
             BufferOffset(buffer.offset_for_anchor(&excerpt.range.context.start));
@@ -6299,7 +6298,8 @@ impl MultiBufferSnapshot {
         range: Range<T>,
     ) -> Option<(tree_sitter::Node<'_>, Range<MultiBufferOffset>)> {
         let range = range.start.to_offset(self)..range.end.to_offset(self);
-        let (excerpt, excerpt_start, input_buffer_range) = self.excerpt_containing(range)?;
+        let (excerpt, excerpt_start, input_buffer_range) =
+            self.excerpt_and_offset_for_range(range)?;
         let buffer = excerpt.buffer_snapshot(self);
         let excerpt_buffer_start =
             BufferOffset(buffer.offset_for_anchor(&excerpt.range.context.start));
@@ -6432,8 +6432,7 @@ impl MultiBufferSnapshot {
     }
 
     /// Returns the excerpt containing range and its offset start within the multibuffer or none if `range` spans multiple excerpts
-    /// FIXME rename
-    pub fn excerpt_containing2<T: ToOffset>(
+    pub fn excerpt_containing<T: ToOffset>(
         &self,
         range: Range<T>,
     ) -> Option<(&BufferSnapshot, ExcerptRange<text::Anchor>)> {
@@ -6690,17 +6689,6 @@ impl MultiBufferSnapshot {
             snapshot,
             range.start.text_anchor_in(snapshot)..range.end.text_anchor_in(snapshot),
         ))
-    }
-
-    /// Returns the excerpt containing the given multibuffer anchor.
-    ///
-    /// Returns None if there are no excerpts.
-    /// FIXME name
-    pub fn excerpt_for_position(
-        &self,
-        head: Anchor,
-    ) -> Option<(&BufferSnapshot, ExcerptRange<text::Anchor>)> {
-        self.excerpt_containing2(head..head)
     }
 
     /// Returns all nonempty intersections of the given buffer range with excerpts in the multibuffer in order

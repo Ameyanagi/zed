@@ -586,7 +586,7 @@ pub fn start_of_excerpt(
     direction: Direction,
 ) -> DisplayPoint {
     let point = map.display_point_to_point(display_point, Bias::Left);
-    let Some((_, excerpt_range)) = map.buffer_snapshot().excerpt_containing2(point..point) else {
+    let Some((_, excerpt_range)) = map.buffer_snapshot().excerpt_containing(point..point) else {
         return display_point;
     };
     match direction {
@@ -623,7 +623,7 @@ pub fn end_of_excerpt(
     direction: Direction,
 ) -> DisplayPoint {
     let point = map.display_point_to_point(display_point, Bias::Left);
-    let Some((_, excerpt_range)) = map.buffer_snapshot().excerpt_containing2(point..point) else {
+    let Some((_, excerpt_range)) = map.buffer_snapshot().excerpt_containing(point..point) else {
         return display_point;
     };
     match direction {
@@ -651,7 +651,7 @@ pub fn end_of_excerpt(
                 let point_end = map.display_point_to_point(end, Bias::Right);
                 let Some((_, excerpt_range)) = map
                     .buffer_snapshot()
-                    .excerpt_containing2(point_end..point_end)
+                    .excerpt_containing(point_end..point_end)
                 else {
                     return display_point;
                 };

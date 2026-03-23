@@ -478,7 +478,7 @@ impl HighlightsTreeView {
             if !self.is_singleton {
                 let excerpt_changed = last_range_end.is_none_or(|point| {
                     snapshot
-                        .excerpt_containing2(point..entry.buffer_point_range.start)
+                        .excerpt_containing(point..entry.buffer_point_range.start)
                         .is_none()
                 });
                 if excerpt_changed {
