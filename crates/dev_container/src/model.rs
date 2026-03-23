@@ -8,20 +8,18 @@ use std::{
 
 use fs::Fs;
 use http_client::HttpClient;
-use serde::{Deserialize, Serialize};
 use smol::process::Command;
 use util::ResultExt;
 
 use crate::{
     DevContainerConfig, DevContainerContext,
-    command_json::evaluate_json_command,
     devcontainer_api::{DevContainerError, DevContainerUp},
     devcontainer_json::{
         DevContainer, DevContainerBuildType, FeatureOptions, MountDefinition,
         deserialize_devcontainer_json,
     },
     docker::{
-        self, Docker, DockerComposeConfig, DockerComposeService, DockerComposeServiceBuild,
+        Docker, DockerComposeConfig, DockerComposeService, DockerComposeServiceBuild,
         DockerComposeVolume, DockerInspect, DockerPs, get_remote_dir_from_config,
     },
     features::{DevContainerFeatureJson, FeatureManifest, parse_oci_feature_ref},
@@ -584,6 +582,7 @@ impl DevContainerManifest {
         match dev_container.build_type() {
             DevContainerBuildType::Image | DevContainerBuildType::Dockerfile => {
                 let built_docker_image = self.build_docker_image().await?;
+                let built_docker_image = self.update_remote_user_uid(built_docker_image).await?;
 
                 let resources = self.build_merged_resources(built_docker_image)?;
                 Ok(DevContainerBuildResources::Docker(resources))
@@ -1026,6 +1025,129 @@ impl DevContainerManifest {
             .await?;
 
         Ok(image)
+    }
+
+    async fn update_remote_user_uid(
+        &self,
+        image: DockerInspect,
+    ) -> Result<DockerInspect, DevContainerError> {
+        let dev_container = self.dev_container();
+
+        let Some(features_build_info) = &self.features_build_info else {
+            return Ok(image);
+        };
+
+        // updateRemoteUserUID defaults to true per the devcontainers spec
+        if dev_container.update_remote_user_uid == Some(false) {
+            return Ok(image);
+        }
+
+        let remote_user = get_remote_user_from_config(&image, self)?;
+        if remote_user == "root" || remote_user.chars().all(|c| c.is_ascii_digit()) {
+            return Ok(image);
+        }
+
+        let image_user = image
+            .config
+            .image_user
+            .as_deref()
+            .unwrap_or("root")
+            .to_string();
+
+        let host_uid = Command::new("id")
+            .arg("-u")
+            .output()
+            .await
+            .map_err(|e| {
+                log::error!("Failed to get host UID: {e}");
+                DevContainerError::CommandFailed("id -u".to_string())
+            })
+            .and_then(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .parse::<u32>()
+                    .map_err(|e| {
+                        log::error!("Failed to parse host UID: {e}");
+                        DevContainerError::CommandFailed("id -u".to_string())
+                    })
+            })?;
+
+        let host_gid = Command::new("id")
+            .arg("-g")
+            .output()
+            .await
+            .map_err(|e| {
+                log::error!("Failed to get host GID: {e}");
+                DevContainerError::CommandFailed("id -g".to_string())
+            })
+            .and_then(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .parse::<u32>()
+                    .map_err(|e| {
+                        log::error!("Failed to parse host GID: {e}");
+                        DevContainerError::CommandFailed("id -g".to_string())
+                    })
+            })?;
+
+        let temp_dir = std::env::temp_dir()
+            .join("devcontainer-zed")
+            .join(format!("update-uid-{}", std::process::id()));
+
+        self.fs.create_dir(&temp_dir).await.map_err(|e| {
+            log::error!("Failed to create temp dir for UID update: {e}");
+            DevContainerError::FilesystemError
+        })?;
+
+        let dockerfile_content = generate_update_uid_dockerfile();
+
+        let dockerfile_path = temp_dir.join("updateUID.Dockerfile");
+        self.fs
+            .write(&dockerfile_path, dockerfile_content.as_bytes())
+            .await
+            .map_err(|e| {
+                log::error!("Failed to write updateUID Dockerfile: {e}");
+                DevContainerError::FilesystemError
+            })?;
+
+        let empty_context_dir = temp_dir.join("empty-context");
+        self.fs.create_dir(&empty_context_dir).await.map_err(|e| {
+            log::error!("Failed to create empty context dir: {e}");
+            DevContainerError::FilesystemError
+        })?;
+
+        let updated_image_tag = format!("{}-uid", features_build_info.image_tag);
+
+        let mut command = Command::new(self.docker_client.docker_cli());
+        command.args(["build"]);
+        command.args(["-f", &dockerfile_path.display().to_string()]);
+        command.args(["-t", &updated_image_tag]);
+        command.args([
+            "--build-arg",
+            &format!("BASE_IMAGE={}", features_build_info.image_tag),
+        ]);
+        command.args(["--build-arg", &format!("REMOTE_USER={}", remote_user)]);
+        command.args(["--build-arg", &format!("NEW_UID={}", host_uid)]);
+        command.args(["--build-arg", &format!("NEW_GID={}", host_gid)]);
+        command.args(["--build-arg", &format!("IMAGE_USER={}", image_user)]);
+        command.arg(empty_context_dir.display().to_string());
+
+        dbg!(&command);
+
+        let output = command.output().await.map_err(|e| {
+            log::error!("Error building UID update image: {e}");
+            DevContainerError::CommandFailed(command.get_program().display().to_string())
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::error!("UID update build failed: {stderr}");
+            return Err(DevContainerError::CommandFailed(
+                command.get_program().display().to_string(),
+            ));
+        }
+
+        self.docker_client.inspect_image(&updated_image_tag).await
     }
 
     fn create_docker_build(&self) -> Result<Command, DevContainerError> {
@@ -1841,6 +1963,45 @@ USER $_DEV_CONTAINERS_IMAGE_USER
 }
 
 /// TODO test
+fn generate_update_uid_dockerfile() -> String {
+    r#"ARG BASE_IMAGE
+FROM $BASE_IMAGE
+
+USER root
+
+ARG REMOTE_USER
+ARG NEW_UID
+ARG NEW_GID
+SHELL ["/bin/sh", "-c"]
+RUN eval $(sed -n "s/${REMOTE_USER}:[^:]*:\([^:]*\):\([^:]*\):[^:]*:\([^:]*\).*/OLD_UID=\1;OLD_GID=\2;HOME_FOLDER=\3/p" /etc/passwd); \
+	eval $(sed -n "s/\([^:]*\):[^:]*:${NEW_UID}:.*/EXISTING_USER=\1/p" /etc/passwd); \
+	eval $(sed -n "s/\([^:]*\):[^:]*:${NEW_GID}:.*/EXISTING_GROUP=\1/p" /etc/group); \
+	if [ -z "$OLD_UID" ]; then \
+		echo "Remote user not found in /etc/passwd ($REMOTE_USER)."; \
+	elif [ "$OLD_UID" = "$NEW_UID" -a "$OLD_GID" = "$NEW_GID" ]; then \
+		echo "UIDs and GIDs are the same ($NEW_UID:$NEW_GID)."; \
+	elif [ "$OLD_UID" != "$NEW_UID" -a -n "$EXISTING_USER" ]; then \
+		echo "User with UID exists ($EXISTING_USER=$NEW_UID)."; \
+	else \
+		if [ "$OLD_GID" != "$NEW_GID" -a -n "$EXISTING_GROUP" ]; then \
+			FREE_GID=65532; \
+			while grep -q ":[^:]*:${FREE_GID}:" /etc/group; do FREE_GID=$((FREE_GID - 1)); done; \
+			echo "Reassigning group $EXISTING_GROUP from GID $NEW_GID to $FREE_GID."; \
+			sed -i -e "s/\(${EXISTING_GROUP}:[^:]*:\)${NEW_GID}:/\1${FREE_GID}:/" /etc/group; \
+		fi; \
+		echo "Updating UID:GID from $OLD_UID:$OLD_GID to $NEW_UID:$NEW_GID."; \
+		sed -i -e "s/\(${REMOTE_USER}:[^:]*:\)[^:]*:[^:]*/\1${NEW_UID}:${NEW_GID}/" /etc/passwd; \
+		if [ "$OLD_GID" != "$NEW_GID" ]; then \
+			sed -i -e "s/\([^:]*:[^:]*:\)${OLD_GID}:/\1${NEW_GID}:/" /etc/group; \
+		fi; \
+		chown -R $NEW_UID:$NEW_GID $HOME_FOLDER; \
+	fi;
+
+ARG IMAGE_USER
+USER $IMAGE_USER
+"#.to_string()
+}
+
 fn image_from_dockerfile(
     devcontainer: &DevContainerManifest,
     dockerfile_contents: String,
@@ -1930,14 +2091,10 @@ fn get_container_user_from_config(
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::HashMap,
-        path::{Path, PathBuf},
-        sync::Arc,
-    };
+    use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
     use fs::FakeFs;
-    use gpui::{AppContext, Entity, TestAppContext};
+    use gpui::{AppContext, TestAppContext};
     use http_client::{FakeHttpClient, HttpClient};
     use project::{
         ProjectEnvironment,

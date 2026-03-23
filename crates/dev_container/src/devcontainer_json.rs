@@ -200,7 +200,7 @@ pub(crate) struct DevContainer {
     pub(crate) remote_env: Option<HashMap<String, String>>,
     pub(crate) container_user: Option<String>,
     #[serde(rename = "updateRemoteUserUID")]
-    update_remote_user_uid: Option<bool>,
+    pub(crate) update_remote_user_uid: Option<bool>,
     user_env_probe: Option<UserEnvProbe>,
     override_command: Option<bool>,
     shutdown_action: Option<ShutdownAction>,
