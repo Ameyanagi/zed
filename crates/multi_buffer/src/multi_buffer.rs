@@ -6675,7 +6675,11 @@ impl MultiBufferSnapshot {
         range: Range<T>,
         buffer: &BufferSnapshot,
     ) -> Option<Range<MultiBufferOffset>> {
-        todo!()
+        let start = range.start.to_offset(buffer);
+        let end = range.end.to_offset(buffer);
+        let text_anchor_range = buffer.anchor_after(start)..buffer.anchor_before(end);
+        let mb_anchor_range = self.anchor_range_in_buffer_with_deleted_hunks(text_anchor_range)?;
+        Some(mb_anchor_range.to_offset(self))
     }
 
     /// Returns all nonempty intersections of the given buffer range with excerpts in the multibuffer in order.
@@ -6839,6 +6843,14 @@ impl MultiBufferSnapshot {
             }
             prev_transform = Some(item);
         }
+    }
+
+    pub fn buffer_anchor_range_to_offset_range(
+        &self,
+        buffer_range: Range<text::Anchor>,
+    ) -> Option<Range<MultiBufferOffset>> {
+        let mb_anchor_range = self.anchor_range_in_buffer_with_deleted_hunks(buffer_range)?;
+        Some(mb_anchor_range.to_offset(self))
     }
 }
 

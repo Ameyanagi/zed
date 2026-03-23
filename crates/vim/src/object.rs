@@ -204,33 +204,31 @@ fn find_mini_delimiters(
     is_valid_delimiter: &DelimiterPredicate,
 ) -> Option<Range<DisplayPoint>> {
     let point = map.clip_at_line_end(display_point).to_point(map);
-    let offset = point.to_offset(&map.buffer_snapshot());
+    let offset = map.buffer_snapshot().point_to_offset(point);
 
     let line_range = get_line_range(map, point);
     let visible_line_range = get_visible_line_range(&line_range);
 
     let snapshot = &map.buffer_snapshot();
-    let mut excerpt = snapshot.excerpt_containing(offset..offset)?;
-    let buffer = excerpt.buffer(snapshot);
-    let buffer_offset = excerpt.map_offset_to_buffer(offset);
+    let (buffer, buffer_offset_range) =
+        snapshot.range_to_buffer_range::<MultiBufferOffset>(offset..offset)?;
+    let buffer_offset = buffer_offset_range.start;
 
     let bracket_filter = |open: Range<usize>, close: Range<usize>| {
         is_valid_delimiter(buffer, open.start, close.start)
     };
 
-    // Try to find delimiters in visible range first
     let ranges = map
         .buffer_snapshot()
         .bracket_ranges(visible_line_range)
         .map(|ranges| {
             ranges.filter_map(|(open, close)| {
-                // Convert the ranges from multibuffer space to buffer space as
-                // that is what `is_valid_delimiter` expects, otherwise it might
-                // panic as the values might be out of bounds.
-                let buffer_open = excerpt.map_range_to_buffer(open.clone());
-                let buffer_close = excerpt.map_range_to_buffer(close.clone());
+                let (_, buffer_open) =
+                    snapshot.range_to_buffer_range::<MultiBufferOffset>(open.clone())?;
+                let (_, buffer_close) =
+                    snapshot.range_to_buffer_range::<MultiBufferOffset>(close.clone())?;
 
-                if is_valid_delimiter(buffer, buffer_open.start.0, buffer_close.start.0) {
+                if is_valid_delimiter(buffer, buffer_open.start, buffer_close.start) {
                     Some((open, close))
                 } else {
                     None
@@ -248,18 +246,13 @@ fn find_mini_delimiters(
         );
     }
 
-    // Fall back to innermost enclosing brackets
     let (open_bracket, close_bracket) = buffer
         .innermost_enclosing_bracket_ranges(buffer_offset..buffer_offset, Some(&bracket_filter))?;
 
     Some(
         DelimiterRange {
-            open: excerpt.map_range_from_buffer(
-                BufferOffset(open_bracket.start)..BufferOffset(open_bracket.end),
-            ),
-            close: excerpt.map_range_from_buffer(
-                BufferOffset(close_bracket.start)..BufferOffset(close_bracket.end),
-            ),
+            open: snapshot.buffer_range_to_range(open_bracket.clone(), buffer)?,
+            close: snapshot.buffer_range_to_range(close_bracket.clone(), buffer)?,
         }
         .to_display_range(map, around),
     )
@@ -937,14 +930,13 @@ pub fn surrounding_html_tag(
 
     let snapshot = &map.buffer_snapshot();
     let offset = head.to_offset(map, Bias::Left);
-    let mut excerpt = snapshot.excerpt_containing(offset..offset)?;
-    let buffer = excerpt.buffer(snapshot);
-    let offset = excerpt.map_offset_to_buffer(offset);
+    let (buffer, buffer_offset_range) =
+        snapshot.range_to_buffer_range::<MultiBufferOffset>(offset..offset)?;
+    let buffer_offset = buffer_offset_range.start;
 
-    // Find the most closest to current offset
-    let mut cursor = buffer.syntax_layer_at(offset)?.node().walk();
+    let mut cursor = buffer.syntax_layer_at(buffer_offset)?.node().walk();
     let mut last_child_node = cursor.node();
-    while cursor.goto_first_child_for_byte(offset.0).is_some() {
+    while cursor.goto_first_child_for_byte(buffer_offset).is_some() {
         last_child_node = cursor.node();
     }
 
@@ -956,31 +948,34 @@ pub fn surrounding_html_tag(
             if let (Some(first_child), Some(last_child)) = (first_child, last_child) {
                 let open_tag = open_tag(buffer.chars_for_range(first_child.byte_range()));
                 let close_tag = close_tag(buffer.chars_for_range(last_child.byte_range()));
-                // It needs to be handled differently according to the selection length
                 let is_valid = if range.end.to_offset(map, Bias::Left)
                     - range.start.to_offset(map, Bias::Left)
                     <= 1
                 {
-                    offset.0 <= last_child.end_byte()
+                    buffer_offset <= last_child.end_byte()
                 } else {
-                    excerpt
-                        .map_offset_to_buffer(range.start.to_offset(map, Bias::Left))
-                        .0
-                        >= first_child.start_byte()
-                        && excerpt
-                            .map_offset_to_buffer(range.end.to_offset(map, Bias::Left))
-                            .0
-                            <= last_child.start_byte() + 1
+                    let range_start_buffer = snapshot
+                        .range_to_buffer_range::<MultiBufferOffset>(
+                            range.start.to_offset(map, Bias::Left)
+                                ..range.start.to_offset(map, Bias::Left),
+                        )
+                        .map(|(_, r)| r.start);
+                    let range_end_buffer = snapshot
+                        .range_to_buffer_range::<MultiBufferOffset>(
+                            range.end.to_offset(map, Bias::Left)
+                                ..range.end.to_offset(map, Bias::Left),
+                        )
+                        .map(|(_, r)| r.start);
+                    range_start_buffer.is_some_and(|s| s >= first_child.start_byte())
+                        && range_end_buffer.is_some_and(|e| e <= last_child.start_byte() + 1)
                 };
                 if open_tag.is_some() && open_tag == close_tag && is_valid {
-                    let range = if around {
+                    let buffer_range = if around {
                         first_child.byte_range().start..last_child.byte_range().end
                     } else {
                         first_child.byte_range().end..last_child.byte_range().start
                     };
-                    let range = BufferOffset(range.start)..BufferOffset(range.end);
-                    if excerpt.contains_buffer_range(range.clone(), snapshot) {
-                        let result = excerpt.map_range_from_buffer(range);
+                    if let Some(result) = snapshot.buffer_range_to_range(buffer_range, buffer) {
                         return Some(
                             result.start.to_display_point(map)..result.end.to_display_point(map),
                         );
@@ -1164,24 +1159,23 @@ fn text_object(
     let snapshot = &map.buffer_snapshot();
     let offset = relative_to.to_offset(map, Bias::Left);
 
-    let mut excerpt = snapshot.excerpt_containing(offset..offset)?;
-    let buffer = excerpt.buffer(snapshot);
-    let offset = excerpt.map_offset_to_buffer(offset);
+    let (buffer, buffer_offset_range) =
+        snapshot.range_to_buffer_range::<MultiBufferOffset>(offset..offset)?;
+    let buffer_offset = buffer_offset_range.start;
 
     let mut matches: Vec<Range<usize>> = buffer
-        .text_object_ranges(offset..offset, TreeSitterOptions::default())
+        .text_object_ranges(buffer_offset..buffer_offset, TreeSitterOptions::default())
         .filter_map(|(r, m)| if m == target { Some(r) } else { None })
         .collect();
     matches.sort_by_key(|r| r.end - r.start);
     if let Some(buffer_range) = matches.first() {
-        let buffer_range = BufferOffset(buffer_range.start)..BufferOffset(buffer_range.end);
-        let range = excerpt.map_range_from_buffer(buffer_range);
+        let range = snapshot.buffer_range_to_range(buffer_range.clone(), buffer)?;
         return Some(range.start.to_display_point(map)..range.end.to_display_point(map));
     }
 
     let around = target.around()?;
     let mut matches: Vec<Range<usize>> = buffer
-        .text_object_ranges(offset..offset, TreeSitterOptions::default())
+        .text_object_ranges(buffer_offset..buffer_offset, TreeSitterOptions::default())
         .filter_map(|(r, m)| if m == around { Some(r) } else { None })
         .collect();
     matches.sort_by_key(|r| r.end - r.start);
@@ -1195,13 +1189,11 @@ fn text_object(
     if let Some(buffer_range) = matches.first()
         && !buffer_range.is_empty()
     {
-        let buffer_range = BufferOffset(buffer_range.start)..BufferOffset(buffer_range.end);
-        let range = excerpt.map_range_from_buffer(buffer_range);
+        let range = snapshot.buffer_range_to_range(buffer_range.clone(), buffer)?;
         return Some(range.start.to_display_point(map)..range.end.to_display_point(map));
     }
-    let around_range = BufferOffset(around_range.start)..BufferOffset(around_range.end);
-    let buffer_range = excerpt.map_range_from_buffer(around_range);
-    return Some(buffer_range.start.to_display_point(map)..buffer_range.end.to_display_point(map));
+    let range = snapshot.buffer_range_to_range(around_range.clone(), buffer)?;
+    return Some(range.start.to_display_point(map)..range.end.to_display_point(map));
 }
 
 fn argument(
