@@ -232,7 +232,11 @@ impl Editor {
                 else {
                     return Task::ready(Ok(Navigated::No));
                 };
-                let Some(mb_anchor) = self.buffer().read(cx).buffer_anchor_to_anchor(anchor, cx)
+                let Some(mb_anchor) = self
+                    .buffer()
+                    .read(cx)
+                    .snapshot(cx)
+                    .buffer_anchor_to_anchor(anchor)
                 else {
                     return Task::ready(Ok(Navigated::No));
                 };

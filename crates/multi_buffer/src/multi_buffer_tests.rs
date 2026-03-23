@@ -3835,10 +3835,8 @@ async fn test_summaries_for_anchors(cx: &mut TestAppContext) {
 
     let anchor_1 = multibuffer.read_with(cx, |multibuffer, cx| {
         multibuffer
-            .buffer_anchor_to_anchor(
-                text::Anchor::min_for_buffer(buffer_1.read(cx).remote_id()),
-                cx,
-            )
+            .snapshot(cx)
+            .buffer_anchor_to_anchor(text::Anchor::min_for_buffer(buffer_1.read(cx).remote_id()))
             .unwrap()
     });
     let point_1 = snapshot.summaries_for_anchors::<Point, _>([&anchor_1])[0];
@@ -3846,10 +3844,8 @@ async fn test_summaries_for_anchors(cx: &mut TestAppContext) {
 
     let anchor_2 = multibuffer.read_with(cx, |multibuffer, cx| {
         multibuffer
-            .buffer_anchor_to_anchor(
-                text::Anchor::min_for_buffer(buffer_2.read(cx).remote_id()),
-                cx,
-            )
+            .snapshot(cx)
+            .buffer_anchor_to_anchor(text::Anchor::min_for_buffer(buffer_2.read(cx).remote_id()))
             .unwrap()
     });
     let point_2 = snapshot.summaries_for_anchors::<Point, _>([&anchor_2])[0];

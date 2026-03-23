@@ -1218,10 +1218,10 @@ mod tests {
             editor
                 .buffer()
                 .read(cx)
-                .buffer_anchor_to_anchor(
-                    text::Anchor::min_for_buffer(toml_buffer.read(cx).remote_id()),
-                    cx,
-                )
+                .snapshot(cx)
+                .buffer_anchor_to_anchor(text::Anchor::min_for_buffer(
+                    toml_buffer.read(cx).remote_id(),
+                ))
                 .unwrap()
         });
         editor.update_in(cx, |editor, _, cx| {

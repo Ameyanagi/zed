@@ -223,10 +223,10 @@ impl CommitView {
                     editor
                         .buffer()
                         .read(cx)
-                        .buffer_anchor_to_anchor(
-                            Anchor::max_for_buffer(message_buffer.read(cx).remote_id()),
-                            cx,
-                        )
+                        .snapshot(cx)
+                        .buffer_anchor_to_anchor(Anchor::max_for_buffer(
+                            message_buffer.read(cx).remote_id(),
+                        ))
                         .map(|anchor| BlockProperties {
                             placement: BlockPlacement::Below(anchor),
                             height: Some(1),

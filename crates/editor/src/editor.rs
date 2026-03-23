@@ -18452,17 +18452,17 @@ impl Editor {
 
             let (locations, current_location_index) =
                 multi_buffer.update(cx, |multi_buffer, cx| {
+                    let multi_buffer_snapshot = multi_buffer.snapshot(cx);
                     let mut locations = locations
                         .into_iter()
                         .filter_map(|loc| {
                             let start =
-                                multi_buffer.buffer_anchor_to_anchor(loc.range.start, cx)?;
-                            let end = multi_buffer.buffer_anchor_to_anchor(loc.range.end, cx)?;
+                                multi_buffer_snapshot.buffer_anchor_to_anchor(loc.range.start)?;
+                            let end =
+                                multi_buffer_snapshot.buffer_anchor_to_anchor(loc.range.end)?;
                             Some(start..end)
                         })
                         .collect::<Vec<_>>();
-
-                    let multi_buffer_snapshot = multi_buffer.snapshot(cx);
                     // There is an O(n) implementation, but given this list will be
                     // small (usually <100 items), the extra O(log(n)) factor isn't
                     // worth the (surprisingly large amount of) extra complexity.

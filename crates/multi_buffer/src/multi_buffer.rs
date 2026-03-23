@@ -1868,11 +1868,6 @@ impl MultiBuffer {
         found
     }
 
-    // todo!() move to snapshot?
-    pub fn buffer_anchor_to_anchor(&self, anchor: text::Anchor, cx: &App) -> Option<Anchor> {
-        self.snapshot(cx).buffer_anchor_to_anchor(anchor)
-    }
-
     pub fn wait_for_anchors<'a, Anchors: 'a + Iterator<Item = Anchor>>(
         &self,
         anchors: Anchors,
