@@ -625,7 +625,7 @@ impl ProjectDiagnosticsEditor {
                         });
                     })
                 }
-                let (anchor_ranges, _, _) = this.multibuffer.update(cx, |multi_buffer, cx| {
+                let (anchor_ranges, _) = this.multibuffer.update(cx, |multi_buffer, cx| {
                     let excerpt_ranges = excerpt_ranges
                         .into_iter()
                         .map(|range| ExcerptRange {

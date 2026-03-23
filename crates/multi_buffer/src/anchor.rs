@@ -305,11 +305,11 @@ impl Anchor {
         matches!(self, Self::Max)
     }
 
-    pub fn in_buffer(path: PathKeyIndex, text_anchor: text::Anchor) -> Self {
+    pub(crate) fn in_buffer(path: PathKeyIndex, text_anchor: text::Anchor) -> Self {
         Self::Excerpt(ExcerptAnchor::in_buffer(path, text_anchor))
     }
 
-    pub fn range_in_buffer(path: PathKeyIndex, range: Range<text::Anchor>) -> Range<Self> {
+    pub(crate) fn range_in_buffer(path: PathKeyIndex, range: Range<text::Anchor>) -> Range<Self> {
         Self::in_buffer(path, range.start)..Self::in_buffer(path, range.end)
     }
 

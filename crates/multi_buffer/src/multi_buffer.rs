@@ -91,7 +91,7 @@ pub struct MultiBuffer {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PathKeyIndex(u64);
+struct PathKeyIndex(u64);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -3619,7 +3619,6 @@ impl MultiBufferSnapshot {
         result
     }
 
-    // todo!() rethink signature
     pub fn range_to_buffer_ranges<T: ToOffset>(
         &self,
         range: Range<T>,
@@ -6343,7 +6342,7 @@ impl MultiBufferSnapshot {
         Some(&self.buffers.get(&buffer_id)?.path_key)
     }
 
-    pub fn path_key_index_for_buffer(&self, buffer_id: BufferId) -> Option<PathKeyIndex> {
+    pub(crate) fn path_key_index_for_buffer(&self, buffer_id: BufferId) -> Option<PathKeyIndex> {
         let snapshot = self.buffers.get(&buffer_id)?;
         Some(snapshot.path_key_index)
     }

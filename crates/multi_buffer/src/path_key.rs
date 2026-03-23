@@ -118,11 +118,10 @@ impl MultiBuffer {
         buffer_snapshot: &BufferSnapshot,
         excerpt_ranges: Vec<ExcerptRange<Point>>,
         cx: &mut Context<Self>,
-    ) -> (Vec<Range<Anchor>>, PathKeyIndex, bool) {
+    ) -> (Vec<Range<Anchor>>, bool) {
         let merged = Self::merge_excerpt_ranges(&excerpt_ranges);
         let (inserted, path_key_index) =
             self.set_merged_excerpt_ranges_for_path(path, buffer, buffer_snapshot, merged, cx);
-        // todo!() move this into the callers that care
         let anchors = excerpt_ranges
             .into_iter()
             .map(|range| {
@@ -132,7 +131,7 @@ impl MultiBuffer {
                 )
             })
             .collect::<Vec<_>>();
-        (anchors, path_key_index, inserted)
+        (anchors, inserted)
     }
 
     pub fn set_anchored_excerpts_for_path(
@@ -293,7 +292,10 @@ impl MultiBuffer {
                     ..buffer_snapshot.anchor_after(r.primary.end),
             })
             .collect::<Vec<_>>();
-        self.update_path_excerpts(path, buffer, buffer_snapshot, &anchor_ranges, cx)
+        let inserted =
+            self.update_path_excerpts(path.clone(), buffer, buffer_snapshot, &anchor_ranges, cx);
+        let path_key_index = self.get_or_create_path_key_index(&path);
+        (inserted, path_key_index)
     }
 
     fn get_or_create_path_key_index(&mut self, path_key: &PathKey) -> PathKeyIndex {
@@ -326,7 +328,7 @@ impl MultiBuffer {
         buffer_snapshot: &BufferSnapshot,
         to_insert: &Vec<ExcerptRange<text::Anchor>>,
         cx: &mut Context<Self>,
-    ) -> (bool, PathKeyIndex) {
+    ) -> bool {
         dbg!("UPDATE");
 
         let path_key_index = self.get_or_create_path_key_index(&path_key);
@@ -342,7 +344,7 @@ impl MultiBuffer {
         if to_insert.len() == 0 {
             self.remove_excerpts(path_key.clone(), cx);
 
-            return (false, path_key_index);
+            return false;
         }
         assert_eq!(self.history.transaction_depth(), 0);
         self.sync_mut(cx);
@@ -569,7 +571,7 @@ impl MultiBuffer {
         });
         cx.notify();
 
-        (added_new_excerpt, path_key_index)
+        added_new_excerpt
     }
 
     pub fn remove_excerpts_for_buffer(&mut self, buffer: BufferId, cx: &mut Context<Self>) {

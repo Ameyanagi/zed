@@ -75,8 +75,6 @@ impl Editor {
         _cx: &Context<Self>,
     ) -> Option<(BufferId, Vec<OutlineItem<Anchor>>)> {
         let (cursor_text_anchor, buffer) = multi_buffer_snapshot.anchor_to_buffer_anchor(cursor)?;
-        let path_key_index =
-            multi_buffer_snapshot.path_key_index_for_buffer(cursor_text_anchor.buffer_id)?;
         let all_items = self
             .lsp_document_symbols
             .get(&cursor_text_anchor.buffer_id)?;
@@ -90,21 +88,30 @@ impl Editor {
                 item.range.start.cmp(&cursor_text_anchor, buffer).is_le()
                     && item.range.end.cmp(&cursor_text_anchor, buffer).is_ge()
             })
-            .map(|item| OutlineItem {
-                depth: item.depth,
-                range: Anchor::range_in_buffer(path_key_index, item.range.clone()),
-                source_range_for_text: Anchor::range_in_buffer(path_key_index, item.range.clone()),
-                text: item.text.clone(),
-                highlight_ranges: item.highlight_ranges.clone(),
-                name_ranges: item.name_ranges.clone(),
-                body_range: item
-                    .body_range
-                    .as_ref()
-                    .map(|r| Anchor::range_in_buffer(path_key_index, r.clone())),
-                annotation_range: item
-                    .annotation_range
-                    .as_ref()
-                    .map(|r| Anchor::range_in_buffer(path_key_index, r.clone())),
+            .filter_map(|item| {
+                let range_start =
+                    multi_buffer_snapshot.anchor_in_buffer_unchecked(item.range.start)?;
+                let range_end = multi_buffer_snapshot.anchor_in_buffer_unchecked(item.range.end)?;
+                Some(OutlineItem {
+                    depth: item.depth,
+                    range: range_start.clone()..range_end.clone(),
+                    source_range_for_text: range_start..range_end,
+                    text: item.text.clone(),
+                    highlight_ranges: item.highlight_ranges.clone(),
+                    name_ranges: item.name_ranges.clone(),
+                    body_range: item.body_range.as_ref().and_then(|r| {
+                        Some(
+                            multi_buffer_snapshot.anchor_in_buffer_unchecked(r.start)?
+                                ..multi_buffer_snapshot.anchor_in_buffer_unchecked(r.end)?,
+                        )
+                    }),
+                    annotation_range: item.annotation_range.as_ref().and_then(|r| {
+                        Some(
+                            multi_buffer_snapshot.anchor_in_buffer_unchecked(r.start)?
+                                ..multi_buffer_snapshot.anchor_in_buffer_unchecked(r.end)?,
+                        )
+                    }),
+                })
             })
             .collect::<Vec<_>>();
 
