@@ -1204,7 +1204,7 @@ fn argument(
     let snapshot = &map.buffer_snapshot();
     let offset = relative_to.to_offset(map, Bias::Left);
     let anchor = snapshot.anchor_after(offset);
-    let buffer_anchor = snapshot.anchor_to_buffer_anchor(anchor)?;
+    let (buffer_anchor, _) = snapshot.anchor_to_buffer_anchor(anchor)?;
 
     // The `argument` vim text object uses the syntax tree, so we operate at the buffer level and map back to the display level
     let (buffer, excerpt_range) = snapshot.excerpt_containing2(offset..offset)?;

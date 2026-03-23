@@ -57,7 +57,7 @@ impl Editor {
         multi_buffer_snapshot: &MultiBufferSnapshot,
         cx: &Context<Self>,
     ) -> bool {
-        let Some(anchor) = multi_buffer_snapshot.anchor_to_buffer_anchor(cursor) else {
+        let Some((anchor, _)) = multi_buffer_snapshot.anchor_to_buffer_anchor(cursor) else {
             return false;
         };
         let Some(buffer) = self.buffer.read(cx).buffer(anchor.buffer_id) else {
@@ -74,10 +74,9 @@ impl Editor {
         multi_buffer_snapshot: &MultiBufferSnapshot,
         _cx: &Context<Self>,
     ) -> Option<(BufferId, Vec<OutlineItem<Anchor>>)> {
-        let cursor_text_anchor = multi_buffer_snapshot.anchor_to_buffer_anchor(cursor)?;
+        let (cursor_text_anchor, buffer) = multi_buffer_snapshot.anchor_to_buffer_anchor(cursor)?;
         let path_key_index =
             multi_buffer_snapshot.path_key_index_for_buffer(cursor_text_anchor.buffer_id)?;
-        let buffer = multi_buffer_snapshot.buffer_for_id(cursor_text_anchor.buffer_id)?;
         let all_items = self
             .lsp_document_symbols
             .get(&cursor_text_anchor.buffer_id)?;

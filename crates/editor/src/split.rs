@@ -574,8 +574,8 @@ impl SplittableEditor {
                         let rhs_anchors = excerpt_anchors
                             .iter()
                             .filter_map(|anchor| {
-                                let anchor = lhs_snapshot.anchor_to_buffer_anchor(*anchor)?;
-                                let lhs_buffer = lhs_snapshot.buffer_for_id(anchor.buffer_id)?;
+                                let (anchor, lhs_buffer) =
+                                    lhs_snapshot.anchor_to_buffer_anchor(*anchor)?;
                                 let rhs_buffer_id =
                                     lhs.companion.read(cx).lhs_to_rhs_buffer(anchor.buffer_id)?;
                                 let rhs_buffer = rhs_snapshot.buffer_for_id(rhs_buffer_id)?;
@@ -1073,7 +1073,7 @@ impl SplittableEditor {
             let paths = excerpt_anchors
                 .clone()
                 .filter_map(|anchor| {
-                    let anchor = snapshot.anchor_to_buffer_anchor(anchor)?;
+                    let (anchor, _) = snapshot.anchor_to_buffer_anchor(anchor)?;
                     let path = snapshot.path_for_buffer(anchor.buffer_id)?;
                     let diff = rhs_multibuffer.diff_for(anchor.buffer_id)?;
                     Some((path.clone(), diff))

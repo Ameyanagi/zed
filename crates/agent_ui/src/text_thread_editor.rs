@@ -538,7 +538,7 @@ impl TextThreadEditor {
         self.text_thread.update(cx, |text_thread, cx| {
             text_thread.reparse(cx);
             for selection in selections.iter() {
-                if let Some(anchor) = snapshot.anchor_to_buffer_anchor(selection.head())
+                if let Some((anchor, _)) = snapshot.anchor_to_buffer_anchor(selection.head())
                     && let Some(command) = text_thread.pending_command_for_position(anchor, cx)
                 {
                     commands_by_range
@@ -1986,7 +1986,7 @@ impl TextThreadEditor {
                         .selections
                         .all::<MultiBufferOffset>(&editor.display_snapshot(cx))
                     {
-                        if let Some(text_anchor) =
+                        if let Some((text_anchor, _)) =
                             snapshot.anchor_to_buffer_anchor(snapshot.anchor_before(selection.end))
                         {
                             image_positions.push(text_anchor);

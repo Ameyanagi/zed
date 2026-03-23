@@ -2210,6 +2210,7 @@ async fn test_following_after_replacement(cx_a: &mut TestAppContext, cx_b: &mut 
                 multibuffer_snapshot
                     .anchor_to_buffer_anchor(range.start)
                     .unwrap()
+                    .0
                     .to_point(&snapshot)
             })
             .collect::<Vec<_>>()
@@ -2242,6 +2243,7 @@ async fn test_following_after_replacement(cx_a: &mut TestAppContext, cx_b: &mut 
                 multibuffer_snapshot
                     .anchor_to_buffer_anchor(range.start)
                     .unwrap()
+                    .0
                     .to_point(&snapshot)
             })
             .collect::<Vec<_>>()

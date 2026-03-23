@@ -5368,9 +5368,11 @@ impl MultiBufferSnapshot {
         None
     }
 
-    /// Returns a buffer anchor for the given anchor, if it is in the multibuffer.
-    /// todo!() could return the snapshot as well?
-    pub fn anchor_to_buffer_anchor(&self, anchor: Anchor) -> Option<text::Anchor> {
+    /// Returns a buffer anchor and its buffer snapshot for the given anchor, if it is in the multibuffer.
+    pub fn anchor_to_buffer_anchor(
+        &self,
+        anchor: Anchor,
+    ) -> Option<(text::Anchor, &BufferSnapshot)> {
         let mut cursor = self.excerpts.cursor::<ExcerptSummary>(());
         cursor.seek(&anchor.seek_target(&self), Bias::Left);
 
@@ -5384,7 +5386,7 @@ impl MultiBufferSnapshot {
         }
 
         let buffer_snapshot = excerpt.buffer_snapshot(&self);
-        Some(anchor.text_anchor_in(buffer_snapshot))
+        Some((anchor.text_anchor_in(buffer_snapshot), buffer_snapshot))
     }
 
     pub fn can_resolve(&self, anchor: &Anchor) -> bool {

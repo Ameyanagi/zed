@@ -660,13 +660,11 @@ pub(crate) async fn insert_images_as_context(
         let Some((text_anchor, multibuffer_anchor)) = editor
             .update_in(cx, |editor, window, cx| {
                 let snapshot = editor.snapshot(window, cx);
-                let buffer_snapshot = snapshot.buffer_snapshot().as_singleton().unwrap();
-
-                let cursor_anchor = snapshot
+                let (cursor_anchor, buffer_snapshot) = snapshot
                     .buffer_snapshot()
                     .anchor_to_buffer_anchor(editor.selections.newest_anchor().start)
                     .unwrap();
-                let text_anchor = cursor_anchor.bias_left(&buffer_snapshot);
+                let text_anchor = cursor_anchor.bias_left(buffer_snapshot);
                 let multibuffer_anchor = snapshot
                     .buffer_snapshot()
                     .buffer_anchor_to_anchor(text_anchor);

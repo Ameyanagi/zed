@@ -2001,7 +2001,8 @@ impl Editor {
         };
 
         let buffer = buffer_snapshot.clone();
-        let Some(buffer_visible_start) = multi_buffer.anchor_to_buffer_anchor(scroll_anchor) else {
+        let Some((buffer_visible_start, _)) = multi_buffer.anchor_to_buffer_anchor(scroll_anchor)
+        else {
             return;
         };
         let buffer_visible_start = buffer_visible_start.to_point(&buffer);
@@ -3203,7 +3204,8 @@ impl Editor {
     pub fn active_buffer(&self, cx: &App) -> Option<Entity<Buffer>> {
         let multibuffer = self.buffer.read(cx);
         let snapshot = multibuffer.snapshot(cx);
-        let anchor = snapshot.anchor_to_buffer_anchor(self.selections.newest_anchor().head())?;
+        let (anchor, _) =
+            snapshot.anchor_to_buffer_anchor(self.selections.newest_anchor().head())?;
         multibuffer.buffer(anchor.buffer_id)
     }
 
@@ -4572,11 +4574,12 @@ impl Editor {
                 continue;
             }
             if self.selections.disjoint_anchor_ranges().any(|s| {
-                let Some(selection_start) = multibuffer_snapshot.anchor_to_buffer_anchor(s.start)
+                let Some((selection_start, _)) =
+                    multibuffer_snapshot.anchor_to_buffer_anchor(s.start)
                 else {
                     return false;
                 };
-                let Some(selection_end) = multibuffer_snapshot.anchor_to_buffer_anchor(s.end)
+                let Some((selection_end, _)) = multibuffer_snapshot.anchor_to_buffer_anchor(s.end)
                 else {
                     return false;
                 };
@@ -6456,7 +6459,7 @@ impl Editor {
 
         let buffer_handle = completions_menu.buffer.clone();
         let multibuffer_snapshot = self.buffer.read(cx).snapshot(cx);
-        let initial_position =
+        let (initial_position, _) =
             multibuffer_snapshot.anchor_to_buffer_anchor(completions_menu.initial_position)?;
 
         let CompletionEdit {
@@ -8261,7 +8264,7 @@ impl Editor {
         };
 
         let buffer_snapshot = self.buffer.read(cx).snapshot(cx);
-        let Some(position) =
+        let Some((position, _)) =
             buffer_snapshot.anchor_to_buffer_anchor(self.selections.newest_anchor().head())
         else {
             return;
@@ -8523,7 +8526,7 @@ impl Editor {
         let selection = self.selections.newest_anchor();
         let multibuffer = self.buffer.read(cx).snapshot(cx);
         let cursor = selection.head();
-        let cursor_text_anchor = multibuffer.anchor_to_buffer_anchor(cursor)?;
+        let (cursor_text_anchor, _) = multibuffer.anchor_to_buffer_anchor(cursor)?;
         let buffer = self.buffer.read(cx).buffer(cursor_text_anchor.buffer_id)?;
 
         // Check project-level disable_ai setting for the current buffer
@@ -9220,8 +9223,8 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> Option<(Entity<Buffer>, u32, Arc<RunnableTasks>)> {
         let snapshot = self.buffer.read(cx).snapshot(cx);
-        let position = snapshot.anchor_to_buffer_anchor(self.selections.newest_anchor().head())?;
-        let buffer = snapshot.buffer_for_id(position.buffer_id)?;
+        let (position, buffer) =
+            snapshot.anchor_to_buffer_anchor(self.selections.newest_anchor().head())?;
         let offset = position.to_offset(&buffer);
         let layer = buffer.syntax_layer_at(offset)?;
         let mut cursor = layer.node().walk();
@@ -10339,7 +10342,7 @@ impl Editor {
                 if !supports_jump {
                     return None;
                 }
-                let target = self.display_snapshot(cx).anchor_to_buffer_anchor(*target)?;
+                let (target, _) = self.display_snapshot(cx).anchor_to_buffer_anchor(*target)?;
 
                 Some(
                     h_flex()
@@ -10377,6 +10380,7 @@ impl Editor {
                 let first_edit_row = self
                     .display_snapshot(cx)
                     .anchor_to_buffer_anchor(edits.first()?.0.start)?
+                    .0
                     .to_point(snapshot)
                     .row;
 
@@ -11822,7 +11826,7 @@ impl Editor {
         snapshot: &EditorSnapshot,
         cx: &mut Context<Self>,
     ) -> Option<(Anchor, Breakpoint)> {
-        let breakpoint_position = snapshot
+        let (breakpoint_position, _) = snapshot
             .buffer_snapshot()
             .anchor_to_buffer_anchor(breakpoint_position)?;
         let buffer = self.buffer.read(cx).buffer(breakpoint_position.buffer_id)?;
@@ -12040,7 +12044,8 @@ impl Editor {
             return;
         };
         let buffer_snapshot = self.buffer.read(cx).snapshot(cx);
-        let Some(position) = buffer_snapshot.anchor_to_buffer_anchor(breakpoint_position) else {
+        let Some((position, _)) = buffer_snapshot.anchor_to_buffer_anchor(breakpoint_position)
+        else {
             return;
         };
         let Some(buffer) = self.buffer.read(cx).buffer(position.buffer_id) else {
@@ -23877,7 +23882,7 @@ impl Editor {
                     let (buffer, buffer_anchor) =
                         editor.buffer.read_with(cx, |multibuffer, cx| {
                             let multibuffer_snapshot = multibuffer.snapshot(cx);
-                            let buffer_anchor = multibuffer_snapshot
+                            let (buffer_anchor, _) = multibuffer_snapshot
                                 .anchor_to_buffer_anchor(current_execution_position)?;
                             let buffer = multibuffer.buffer(buffer_anchor.buffer_id)?;
                             Some((buffer, buffer_anchor))

@@ -307,7 +307,7 @@ impl ProjectDiagnosticsEditor {
                 .all_anchors(&snapshot)
                 .iter()
                 .filter_map(|anchor| {
-                    Some(snapshot.anchor_to_buffer_anchor(anchor.start)?.buffer_id)
+                    Some(snapshot.anchor_to_buffer_anchor(anchor.start)?.0.buffer_id)
                 })
                 .collect::<HashSet<_>>()
         });

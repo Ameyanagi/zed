@@ -274,7 +274,7 @@ impl MessageEditor {
             COMMAND_HINT_INLAY_ID,
             hint_pos,
             &InlayHint {
-                position: snapshot.anchor_to_buffer_anchor(hint_pos)?,
+                position: snapshot.anchor_to_buffer_anchor(hint_pos)?.0,
                 label: InlayHintLabel::String(hint),
                 kind: Some(InlayHintKind::Parameter),
                 padding_left: false,
@@ -316,6 +316,7 @@ impl MessageEditor {
             snapshot
                 .anchor_to_buffer_anchor(snapshot.anchor_before(Point::zero()))
                 .unwrap()
+                .0
         });
 
         let supports_images = self.prompt_capabilities.borrow().image;
@@ -648,7 +649,7 @@ impl MessageEditor {
         if should_insert_creases && let Some(selections) = editor_clipboard_selections {
             cx.stop_propagation();
             let snapshot = self.editor.read(cx).buffer().read(cx).snapshot(cx);
-            let insertion_target = snapshot
+            let (insertion_target, _) = snapshot
                 .anchor_to_buffer_anchor(self.editor.read(cx).selections.newest_anchor().start)
                 .unwrap();
 
@@ -788,7 +789,7 @@ impl MessageEditor {
 
                     for (anchor, content_len, mention_uri) in all_mentions {
                         let Some((crease_id, tx)) = insert_crease_for_mention(
-                            snapshot.anchor_to_buffer_anchor(anchor).unwrap(),
+                            snapshot.anchor_to_buffer_anchor(anchor).unwrap().0,
                             content_len,
                             mention_uri.name().into(),
                             mention_uri.icon_path(cx),
@@ -952,11 +953,10 @@ impl MessageEditor {
         let (text_anchor, content_len) = self.editor.update(cx, |editor, cx| {
             let buffer = editor.buffer().read(cx);
             let snapshot = buffer.snapshot(cx);
-            let buffer_snapshot = snapshot.as_singleton().unwrap();
-            let text_anchor = snapshot
+            let (anchor, buffer_snapshot) = snapshot
                 .anchor_to_buffer_anchor(editor.selections.newest_anchor().start)
-                .unwrap()
-                .bias_left(&buffer_snapshot);
+                .unwrap();
+            let text_anchor = anchor.bias_left(buffer_snapshot);
 
             editor.insert(&mention_text, window, cx);
             editor.insert(" ", window, cx);
@@ -1269,7 +1269,7 @@ impl MessageEditor {
         for (range, mention_uri, mention) in mentions {
             let anchor = snapshot.anchor_before(MultiBufferOffset(range.start));
             let Some((crease_id, tx)) = insert_crease_for_mention(
-                snapshot.anchor_to_buffer_anchor(anchor).unwrap(),
+                snapshot.anchor_to_buffer_anchor(anchor).unwrap().0,
                 range.end - range.start,
                 mention_uri.name().into(),
                 mention_uri.icon_path(cx),

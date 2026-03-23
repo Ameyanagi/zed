@@ -44,10 +44,11 @@ where
         .disjoint_anchors_arc()
         .iter()
         .filter_map(|selection| {
-            let text_anchor = multibuffer_snapshot.anchor_to_buffer_anchor(selection.head())?;
+            let (text_anchor, _) =
+                multibuffer_snapshot.anchor_to_buffer_anchor(selection.head())?;
             Some((selection.head(), text_anchor))
         })
-        .unique_by(|(_, buffer_id)| *buffer_id)
+        .unique_by(|(_, anchor)| *anchor)
         .find_map(|(trigger_anchor, text_anchor)| {
             let buffer = editor.buffer().read(cx).buffer(text_anchor.buffer_id)?;
             let language = buffer.read(cx).language_at(text_anchor)?;

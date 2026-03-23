@@ -321,7 +321,9 @@ pub fn task_contexts(
 
     let latest_selection = active_editor.as_ref().and_then(|active_editor| {
         let snapshot = active_editor.read(cx).buffer().read(cx).snapshot(cx);
-        snapshot.anchor_to_buffer_anchor(active_editor.read(cx).selections.newest_anchor().head())
+        snapshot
+            .anchor_to_buffer_anchor(active_editor.read(cx).selections.newest_anchor().head())
+            .map(|(anchor, _)| anchor)
     });
 
     let mut worktree_abs_paths = workspace

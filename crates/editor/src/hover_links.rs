@@ -320,7 +320,7 @@ pub fn show_link_definition(
     }
 
     let anchor = trigger_point.anchor().bias_left(snapshot.buffer_snapshot());
-    let Some(anchor) = snapshot.buffer_snapshot().anchor_to_buffer_anchor(anchor) else {
+    let Some((anchor, _)) = snapshot.buffer_snapshot().anchor_to_buffer_anchor(anchor) else {
         return;
     };
     let Some(buffer) = editor.buffer.read(cx).buffer(anchor.buffer_id) else {

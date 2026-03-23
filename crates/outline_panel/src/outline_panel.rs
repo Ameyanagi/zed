@@ -2131,7 +2131,7 @@ impl OutlinePanel {
                 PanelEntry::Fs(FsEntry::ExternalFile(..)) => None,
                 PanelEntry::Search(SearchEntry { match_range, .. }) => multibuffer_snapshot
                     .anchor_to_buffer_anchor(match_range.start)
-                    .map(|anchor| anchor.buffer_id)
+                    .map(|(anchor, _)| anchor.buffer_id)
                     .map(|buffer_id| {
                         outline_panel.update(cx, |outline_panel, cx| {
                             outline_panel
@@ -3198,7 +3198,7 @@ impl OutlinePanel {
         let multi_buffer_snapshot = multi_buffer.read(cx).snapshot(cx);
         let anchor = editor.update(cx, |editor, cx| editor.selections.newest_anchor().head());
         let selection_display_point = anchor.to_display_point(&editor_snapshot);
-        let anchor = multi_buffer_snapshot.anchor_to_buffer_anchor(anchor)?;
+        let (anchor, _) = multi_buffer_snapshot.anchor_to_buffer_anchor(anchor)?;
 
         if editor.read(cx).is_buffer_folded(anchor.buffer_id, cx) {
             return self

@@ -1386,14 +1386,10 @@ impl EditorElement {
                 .snapshot
                 .display_point_to_anchor(valid_point, Bias::Left);
 
-            if let Some(buffer_anchor) = position_map
+            if let Some((buffer_anchor, buffer_snapshot)) = position_map
                 .snapshot
                 .buffer_snapshot()
                 .anchor_to_buffer_anchor(buffer_anchor)
-                && let Some(buffer_snapshot) = position_map
-                    .snapshot
-                    .buffer_snapshot()
-                    .buffer_for_id(buffer_anchor.buffer_id)
                 && let Some(file) = buffer_snapshot.file()
             {
                 let as_point = text::ToPoint::to_point(&buffer_anchor, buffer_snapshot);
@@ -8135,7 +8131,7 @@ pub(crate) fn header_jump_data(
 ) -> JumpData {
     let jump_target = if let Some(anchor) =
         latest_selection_anchors.get(&first_excerpt.buffer.remote_id())
-        && let Some(jump_anchor) = editor_snapshot
+        && let Some((jump_anchor, _)) = editor_snapshot
             .buffer_snapshot()
             .anchor_to_buffer_anchor(*anchor)
     {

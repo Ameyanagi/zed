@@ -593,7 +593,7 @@ impl MarksState {
             name.clone(),
             anchors
                 .into_iter()
-                .filter_map(|anchor| multibuffer_snapshot.anchor_to_buffer_anchor(anchor))
+                .filter_map(|anchor| Some(multibuffer_snapshot.anchor_to_buffer_anchor(anchor)?.0))
                 .collect(),
         );
         if !self.watched_buffers.contains_key(&buffer_id) {

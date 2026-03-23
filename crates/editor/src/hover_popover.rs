@@ -242,7 +242,7 @@ fn show_hover(
 
     let snapshot = editor.snapshot(window, cx);
 
-    let buffer_position = editor
+    let (buffer_position, _) = editor
         .buffer
         .read(cx)
         .snapshot(cx)

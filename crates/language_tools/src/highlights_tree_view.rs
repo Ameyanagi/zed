@@ -1067,7 +1067,7 @@ fn excerpt_label_for(
 ) -> SharedString {
     let path_label = snapshot
         .anchor_to_buffer_anchor(entry.range.start)
-        .and_then(|anchor| snapshot.buffer_for_id(anchor.buffer_id))
+        .and_then(|(anchor, _)| snapshot.buffer_for_id(anchor.buffer_id))
         .and_then(|buf| buf.file())
         .map(|file| {
             let full_path = file.full_path(cx);
