@@ -6243,7 +6243,7 @@ mod tests {
         });
         cx.run_until_parked();
 
-        // The worktree thread should be absorbed under the main project
+        // The worktree thread should be grouped under the main project
         // and show live running status.
         let entries = visible_entries_as_strings(&sidebar, cx);
         assert_eq!(
