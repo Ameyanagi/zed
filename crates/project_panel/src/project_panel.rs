@@ -1948,14 +1948,12 @@ impl ProjectPanel {
                 // Record the operation if the edit was applied
                 if new_entry.is_ok() {
                     let operation = if let Some(old_entry) = edited_entry {
-                        ProjectPanelOperation::Rename {
-                            from: (worktree_id, old_entry.path).into(),
-                            to: new_project_path,
-                        }
+                        ProjectPanelOperation::Rename(
+                            (worktree_id, old_entry.path).into(),
+                            new_project_path,
+                        )
                     } else {
-                        ProjectPanelOperation::Create {
-                            project_path: new_project_path,
-                        }
+                        ProjectPanelOperation::Create(new_project_path)
                     };
                     project_panel.undo_manager.record(operation);
                 }
@@ -3200,7 +3198,7 @@ impl ProjectPanel {
                                 .await
                                 .notify_workspace_async_err(workspace.clone(), &mut cx)
                             {
-                                operations.push(ProjectPanelOperation::Rename { from, to });
+                                operations.push(ProjectPanelOperation::Rename(from, to));
                                 last_succeed = Some(entry);
                             }
                         }
@@ -3209,9 +3207,7 @@ impl ProjectPanel {
                                 .await
                                 .notify_workspace_async_err(workspace.clone(), &mut cx)
                             {
-                                operations.push(ProjectPanelOperation::Create {
-                                    project_path: destination,
-                                });
+                                operations.push(ProjectPanelOperation::Create(destination));
                                 last_succeed = Some(entry);
                             }
                         }
@@ -4524,9 +4520,9 @@ impl ProjectPanel {
                     for task in copy_tasks.into_iter() {
                         if let Some(Some(entry)) = task.await.log_err() {
                             last_succeed = Some(entry.id);
-                            operations.push(ProjectPanelOperation::Create {
-                                project_path: (worktree_id, entry.path).into(),
-                            });
+                            operations.push(ProjectPanelOperation::Create(
+                                (worktree_id, entry.path).into(),
+                            ));
                         }
                     }
                     // update selection
@@ -4631,10 +4627,10 @@ impl ProjectPanel {
                             if let (Some(old_path), Some(worktree_id)) =
                                 (old_paths.get(&entry_id), destination_worktree_id)
                             {
-                                operations.push(ProjectPanelOperation::Rename {
-                                    from: old_path.clone(),
-                                    to: (worktree_id, new_entry.path).into(),
-                                });
+                                operations.push(ProjectPanelOperation::Rename(
+                                    old_path.clone(),
+                                    (worktree_id, new_entry.path).into(),
+                                ));
                             }
                         }
                     }
@@ -4658,10 +4654,10 @@ impl ProjectPanel {
                             if let (Some(old_path), Some(worktree_id)) =
                                 (old_paths.get(&entry_id), destination_worktree_id)
                             {
-                                operations.push(ProjectPanelOperation::Rename {
-                                    from: old_path.clone(),
-                                    to: (worktree_id, new_entry.path.clone()).into(),
-                                });
+                                operations.push(ProjectPanelOperation::Rename(
+                                    old_path.clone(),
+                                    (worktree_id, new_entry.path.clone()).into(),
+                                ));
                             }
                             move_results.push((entry_id, new_entry));
                         }

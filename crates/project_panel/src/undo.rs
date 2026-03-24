@@ -14,24 +14,17 @@ const MAX_UNDO_OPERATIONS: usize = 10_000;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProjectPanelOperation {
     Batch(Vec<ProjectPanelOperation>),
-    Create { project_path: ProjectPath },
-    Trash { project_path: ProjectPath },
-    Rename { from: ProjectPath, to: ProjectPath },
+    Create(ProjectPath),
+    Trash(ProjectPath),
+    Rename(ProjectPath, ProjectPath),
 }
 
 impl ProjectPanelOperation {
     fn inverse(&self) -> Self {
         match self {
-            Self::Create { project_path } => Self::Trash {
-                project_path: project_path.clone(),
-            },
-            Self::Trash { project_path } => Self::Create {
-                project_path: project_path.clone(),
-            },
-            Self::Rename { from, to } => Self::Rename {
-                from: to.clone(),
-                to: from.clone(),
-            },
+            Self::Create(project_path) => Self::Trash(project_path.clone()),
+            Self::Trash(project_path) => Self::Create(project_path.clone()),
+            Self::Rename(from, to) => Self::Rename(to.clone(), from.clone()),
             // When inverting a batch of operations, we reverse the order of
             // operations to handle dependencies between them. For example, if a
             // batch contains the following order of operations:
@@ -173,9 +166,9 @@ impl UndoManager {
         cx: &mut App,
     ) -> Task<Result<ProjectPanelOperation>> {
         match operation {
-            ProjectPanelOperation::Rename { from, to } => self.rename(from, to, cx),
-            ProjectPanelOperation::Trash { project_path } => self.trash(project_path, cx),
-            ProjectPanelOperation::Create { project_path } => self.create(project_path, cx),
+            ProjectPanelOperation::Rename(from, to) => self.rename(from, to, cx),
+            ProjectPanelOperation::Trash(project_path) => self.trash(project_path, cx),
+            ProjectPanelOperation::Create(project_path) => self.create(project_path, cx),
             ProjectPanelOperation::Batch(operations) => self.batch(operations, cx),
         }
     }
@@ -210,10 +203,7 @@ impl UndoManager {
         let to = to.clone();
         cx.spawn(async move |_| match task.await {
             Err(err) => Err(err),
-            Ok(_) => Ok(ProjectPanelOperation::Rename {
-                from: to.clone(),
-                to: from.clone(),
-            }),
+            Ok(_) => Ok(ProjectPanelOperation::Rename(to.clone(), from.clone())),
         })
     }
 
@@ -241,7 +231,7 @@ impl UndoManager {
 
         let project_path = project_path.clone();
         cx.spawn(async move |_| match task.await {
-            Ok(_) => Ok(ProjectPanelOperation::Trash { project_path }),
+            Ok(_) => Ok(ProjectPanelOperation::Trash(project_path)),
             Err(err) => Err(err),
         })
     }
@@ -277,7 +267,7 @@ impl UndoManager {
         cx.spawn(async move |_| match task.await {
             // We'll want this to eventually be a `Restore` operation, once
             // we've added support, in `fs` to track and restore a trashed file.
-            Ok(_) => Ok(ProjectPanelOperation::Create { project_path }),
+            Ok(_) => Ok(ProjectPanelOperation::Create(project_path)),
             Err(err) => Err(err),
         })
     }
@@ -331,7 +321,7 @@ impl UndoManager {
 }
 
 #[cfg(test)]
-pub(crate) mod test {
+pub(crate) mod tests {
     use crate::{
         ProjectPanel, project_panel_tests,
         undo::{ProjectPanelOperation, UndoManager},
@@ -377,24 +367,20 @@ pub(crate) mod test {
         worktree_id: WorktreeId,
         file_name: &str,
     ) -> ProjectPanelOperation {
-        ProjectPanelOperation::Create {
-            project_path: ProjectPath {
-                path: Arc::from(rel_path(file_name)),
-                worktree_id,
-            },
-        }
+        ProjectPanelOperation::Create(ProjectPath {
+            path: Arc::from(rel_path(file_name)),
+            worktree_id,
+        })
     }
 
     pub(crate) fn build_trash_operation(
         worktree_id: WorktreeId,
         file_name: &str,
     ) -> ProjectPanelOperation {
-        ProjectPanelOperation::Trash {
-            project_path: ProjectPath {
-                path: Arc::from(rel_path(file_name)),
-                worktree_id,
-            },
-        }
+        ProjectPanelOperation::Trash(ProjectPath {
+            path: Arc::from(rel_path(file_name)),
+            worktree_id,
+        })
     }
 
     pub(crate) fn build_rename_operation(
@@ -405,16 +391,16 @@ pub(crate) mod test {
         let from_path = Arc::from(rel_path(from));
         let to_path = Arc::from(rel_path(to));
 
-        ProjectPanelOperation::Rename {
-            from: ProjectPath {
+        ProjectPanelOperation::Rename(
+            ProjectPath {
                 worktree_id,
                 path: from_path,
             },
-            to: ProjectPath {
+            ProjectPath {
                 worktree_id,
                 path: to_path,
             },
-        }
+        )
     }
 
     async fn rename(

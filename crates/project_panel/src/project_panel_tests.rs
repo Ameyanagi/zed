@@ -1,5 +1,5 @@
 use super::*;
-use crate::undo::test::{build_create_operation, build_rename_operation};
+use crate::undo::tests::{build_create_operation, build_rename_operation};
 use collections::HashSet;
 use editor::MultiBufferOffset;
 use gpui::{Empty, Entity, TestAppContext, VisualTestContext};
