@@ -442,7 +442,7 @@ impl InlineAssistant {
         let newest_selection = newest_selection.unwrap();
 
         let mut codegen_ranges = Vec::new();
-        for (buffer, buffer_range) in selections
+        for (buffer, buffer_range, _) in selections
             .iter()
             .flat_map(|selection| snapshot.range_to_buffer_ranges(selection.start..selection.end))
         {
@@ -1092,7 +1092,7 @@ impl InlineAssistant {
                         snapshot.range_to_buffer_ranges(assist.range.start..assist.range.end);
                     ranges
                         .first()
-                        .and_then(|(buffer, _)| buffer.language())
+                        .and_then(|(buffer, _, _)| buffer.language())
                         .map(|language| language.name().0.to_string())
                 });
 

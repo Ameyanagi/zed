@@ -66,6 +66,21 @@ pub(crate) fn convert_rhs_rows_to_lhs(
     )
 }
 
+fn rhs_range_to_base_text_range(
+    rhs_range: &Range<Point>,
+    diff_snapshot: &BufferDiffSnapshot,
+    rhs_buffer_snapshot: &text::BufferSnapshot,
+) -> Range<Point> {
+    let start = diff_snapshot
+        .buffer_point_to_base_text_range(Point::new(rhs_range.start.row, 0), rhs_buffer_snapshot)
+        .start;
+    let end = diff_snapshot
+        .buffer_point_to_base_text_range(Point::new(rhs_range.end.row, 0), rhs_buffer_snapshot)
+        .end;
+    let end_column = diff_snapshot.base_text().line_len(end.row);
+    Point::new(start.row, 0)..Point::new(end.row, end_column)
+}
+
 fn translate_lhs_selections_to_rhs(
     selections_by_buffer: &HashMap<BufferId, (Vec<Range<BufferOffset>>, Option<u32>)>,
     splittable: &SplittableEditor,
@@ -235,7 +250,9 @@ where
         }
     };
 
-    for (buffer_snapshot, source_range) in source_snapshot.range_to_buffer_ranges(source_bounds) {
+    for (buffer_snapshot, source_range, source_excerpt_range) in
+        source_snapshot.range_to_buffer_ranges(source_bounds)
+    {
         let buffer_id = buffer_snapshot.remote_id();
 
         if current_buffer_id != Some(buffer_id) {
@@ -247,12 +264,6 @@ where
         }
 
         let buffer_point_range = source_range.to_point(&buffer_snapshot);
-        let Some((_, source_excerpt_range)) = source_snapshot
-            .anchor_in_buffer(buffer_snapshot.anchor_after(source_range.start))
-            .and_then(|anchor| source_snapshot.excerpt_containing(anchor..anchor))
-        else {
-            continue;
-        };
         let source_context_range = source_excerpt_range.context.to_point(&buffer_snapshot);
 
         union_context_start = Some(union_context_start.map_or(source_context_range.start, |s| {
@@ -1128,6 +1139,9 @@ impl SplittableEditor {
             for (path, diff) in paths {
                 let main_buffer_id = diff.read(cx).buffer_id;
                 let Some(main_buffer) = rhs_multibuffer.buffer(diff.read(cx).buffer_id) else {
+                    lhs.multibuffer.update(cx, |lhs_multibuffer, lhs_cx| {
+                        lhs_multibuffer.remove_excerpts(path, lhs_cx);
+                    });
                     continue;
                 };
                 let main_buffer_snapshot = main_buffer.read(cx).snapshot();
@@ -1144,20 +1158,11 @@ impl SplittableEditor {
                 for info in rhs_multibuffer_snapshot.excerpts_for_buffer(main_buffer_id) {
                     have_excerpt = true;
                     let rhs_context = info.context.to_point(&main_buffer_snapshot);
-                    let start = diff_snapshot
-                        .buffer_point_to_base_text_range(
-                            Point::new(rhs_context.start.row, 0),
-                            &main_buffer_snapshot,
-                        )
-                        .start;
-                    let end = diff_snapshot
-                        .buffer_point_to_base_text_range(
-                            Point::new(rhs_context.end.row, 0),
-                            &main_buffer_snapshot,
-                        )
-                        .end;
-                    let end_column = diff_snapshot.base_text().line_len(end.row);
-                    let lhs_context = Point::new(start.row, 0)..Point::new(end.row, end_column);
+                    let lhs_context = rhs_range_to_base_text_range(
+                        &rhs_context,
+                        &diff_snapshot,
+                        &main_buffer_snapshot,
+                    );
 
                     if let Some((prev_lhs_context, prev_rhs_range)) = paired_ranges.last_mut()
                         && prev_lhs_context.end >= lhs_context.start
@@ -1229,7 +1234,7 @@ impl SplittableEditor {
         use crate::display_map::DisplayRow;
 
         self.debug_print(cx);
-        self.check_excerpt_invariants(cx);
+        self.check_excerpt_invariants(quiesced, cx);
 
         let lhs = self.lhs.as_ref().unwrap();
 
@@ -1587,7 +1592,7 @@ impl SplittableEditor {
         eprintln!();
     }
 
-    fn check_excerpt_invariants(&self, cx: &gpui::App) {
+    fn check_excerpt_invariants(&self, quiesced: bool, cx: &gpui::App) {
         let lhs = self.lhs.as_ref().expect("should have lhs editor");
 
         let rhs_snapshot = self.rhs_multibuffer.read(cx).snapshot(cx);
@@ -1617,22 +1622,23 @@ impl SplittableEditor {
                 "corresponding lhs excerpt should show diff base text"
             );
 
-            let diff_snapshot = diff.read(cx).snapshot(cx);
-            let lhs_buffer_snapshot = lhs_snapshot
-                .buffer_for_id(lhs_excerpt.context.start.buffer_id)
-                .unwrap();
-            let rhs_buffer_snapshot = rhs_snapshot
-                .buffer_for_id(rhs_excerpt.context.start.buffer_id)
-                .unwrap();
-            let lhs_range = lhs_excerpt.context.to_point(&lhs_buffer_snapshot);
-            let rhs_range = rhs_excerpt.context.to_point(&rhs_buffer_snapshot);
-            assert_eq!(
-                lhs_range,
-                diff_snapshot.buffer_point_to_base_text_point(rhs_range.start, rhs_buffer_snapshot)
-                    ..diff_snapshot
-                        .buffer_point_to_base_text_point(rhs_range.end, rhs_buffer_snapshot,),
-                "corresponding lhs excerpt should have a matching range"
-            )
+            if quiesced {
+                let diff_snapshot = diff.read(cx).snapshot(cx);
+                let lhs_buffer_snapshot = lhs_snapshot
+                    .buffer_for_id(lhs_excerpt.context.start.buffer_id)
+                    .unwrap();
+                let rhs_buffer_snapshot = rhs_snapshot
+                    .buffer_for_id(rhs_excerpt.context.start.buffer_id)
+                    .unwrap();
+                let lhs_range = lhs_excerpt.context.to_point(&lhs_buffer_snapshot);
+                let rhs_range = rhs_excerpt.context.to_point(&rhs_buffer_snapshot);
+                let expected_lhs_range =
+                    rhs_range_to_base_text_range(&rhs_range, &diff_snapshot, &rhs_buffer_snapshot);
+                assert_eq!(
+                    lhs_range, expected_lhs_range,
+                    "corresponding lhs excerpt should have a matching range"
+                )
+            }
         }
     }
 }

@@ -7866,7 +7866,7 @@ impl EditorElement {
                 return;
             }
             let buffer_snapshot = &display_snapshot.buffer_snapshot();
-            for (excerpt_buffer_snapshot, buffer_range) in
+            for (excerpt_buffer_snapshot, buffer_range, _) in
                 buffer_snapshot.range_to_buffer_ranges(anchor_range.start..anchor_range.end)
             {
                 let buffer_range = excerpt_buffer_snapshot.anchor_after(buffer_range.start)

@@ -257,7 +257,7 @@ impl SyntaxTreeView {
                 .last::<MultiBufferOffset>(&editor.display_snapshot(cx))
                 .range();
             let multi_buffer = editor.buffer().read(cx);
-            let (buffer, range) = snapshot
+            let (buffer, range, _) = snapshot
                 .buffer_snapshot()
                 .range_to_buffer_ranges(selection_range.start..selection_range.end)
                 .pop()?;

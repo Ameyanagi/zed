@@ -5789,8 +5789,8 @@ impl Editor {
         multi_buffer_snapshot
             .range_to_buffer_ranges(visible_range)
             .into_iter()
-            .filter(|(_, excerpt_visible_range)| !excerpt_visible_range.is_empty())
-            .filter_map(|(buffer, _)| {
+            .filter(|(_, excerpt_visible_range, _)| !excerpt_visible_range.is_empty())
+            .filter_map(|(buffer, _, _)| {
                 let buffer_entity = multi_buffer.buffer(buffer.remote_id())?;
                 let project = project.as_ref()?.read(cx);
                 let buffer_file = project::File::from_dyn(buffer.file())?;
@@ -5815,8 +5815,8 @@ impl Editor {
         multi_buffer_snapshot
             .range_to_buffer_ranges(visible_range)
             .into_iter()
-            .filter(|(_, excerpt_visible_range)| !excerpt_visible_range.is_empty())
-            .map(|(buffer, excerpt_visible_range)| {
+            .filter(|(_, excerpt_visible_range, _)| !excerpt_visible_range.is_empty())
+            .map(|(buffer, excerpt_visible_range, _)| {
                 (
                     buffer,
                     excerpt_visible_range.start.0..excerpt_visible_range.end.0,
@@ -7567,7 +7567,7 @@ impl Editor {
                         multi_buffer_range_to_query.start..multi_buffer_range_to_query.end,
                     )
                     .into_iter()
-                    .filter(|(_, excerpt_visible_range)| !excerpt_visible_range.is_empty());
+                    .filter(|(_, excerpt_visible_range, _)| !excerpt_visible_range.is_empty());
                 let mut match_ranges = Vec::new();
                 let Ok(regex) = project::search::SearchQuery::text(
                     query_text.clone(),
@@ -7582,7 +7582,7 @@ impl Editor {
                     return Vec::default();
                 };
                 let query_range = query_range.to_anchors(&multi_buffer_snapshot);
-                for (buffer_snapshot, search_range) in buffer_ranges {
+                for (buffer_snapshot, search_range, _) in buffer_ranges {
                     match_ranges.extend(
                         regex
                             .search(
@@ -8815,7 +8815,7 @@ impl Editor {
         let range = snapshot.display_point_to_point(DisplayPoint::new(range.start, 0), Bias::Left)
             ..snapshot.display_point_to_point(DisplayPoint::new(range.end, 0), Bias::Right);
 
-        for (buffer_snapshot, range) in
+        for (buffer_snapshot, range, _) in
             multi_buffer_snapshot.range_to_buffer_ranges(range.start..range.end)
         {
             let Some(buffer) = self.buffer().read(cx).buffer(buffer_snapshot.remote_id()) else {
@@ -17108,14 +17108,12 @@ impl Editor {
             if hide_runnables {
                 return;
             }
-            let new_rows =
-                cx.background_spawn({
+            let new_rows = cx
+                .background_spawn({
                     let snapshot = display_snapshot.clone();
-                    async move {
-                        Self::fetch_runnable_ranges(&snapshot, Anchor::Min..Anchor::Max)
-                    }
+                    async move { Self::fetch_runnable_ranges(&snapshot, Anchor::Min..Anchor::Max) }
                 })
-                    .await;
+                .await;
             let Ok(lsp_tasks) =
                 cx.update(|_, cx| crate::lsp_tasks(project.clone(), &task_sources, None, cx))
             else {
@@ -17464,7 +17462,7 @@ impl Editor {
                 snapshot
                     .range_to_buffer_ranges(selection.range())
                     .into_iter()
-                    .filter_map(|(buffer_snapshot, range)| {
+                    .filter_map(|(buffer_snapshot, range, _)| {
                         snapshot.anchor_in_excerpt(buffer_snapshot.anchor_after(range.start))
                     })
             })
@@ -19190,7 +19188,7 @@ impl Editor {
                 let mut buffer_id_to_ranges: BTreeMap<BufferId, Vec<Range<text::Anchor>>> =
                     BTreeMap::new();
                 for selection_range in selection_ranges {
-                    for (buffer_snapshot, buffer_range) in
+                    for (buffer_snapshot, buffer_range, _) in
                         snapshot.range_to_buffer_ranges(selection_range.start..selection_range.end)
                     {
                         let buffer_id = buffer_snapshot.remote_id();
@@ -22396,7 +22394,7 @@ impl Editor {
                                 snapshot.range_to_buffer_ranges(start_point..end_point);
                             let ranges: Vec<(u32, u32)> = buffer_ranges
                                 .iter()
-                                .map(|(buffer_snapshot, range)| {
+                                .map(|(buffer_snapshot, range, _)| {
                                     let start = buffer_snapshot.offset_to_point(range.start.0).row;
                                     let end = buffer_snapshot.offset_to_point(range.end.0).row;
                                     (start, end)
@@ -23075,7 +23073,7 @@ impl Editor {
             let buffer_ranges = multi_buffer_snapshot
                 .range_to_buffer_ranges(selection_range.start..selection_range.end);
 
-            let (buffer_snapshot, range) = if selection.reversed {
+            let (buffer_snapshot, range, _) = if selection.reversed {
                 buffer_ranges.first()
             } else {
                 buffer_ranges.last()
@@ -26207,7 +26205,7 @@ impl NewlineConfig {
             .range_to_buffer_ranges(range.start..range.end)
             .as_slice()
         {
-            [(buffer_snapshot, range)] => (buffer_snapshot.clone(), range.clone()),
+            [(buffer_snapshot, range, _)] => (buffer_snapshot.clone(), range.clone()),
             _ => return false,
         };
         let pair = {

@@ -133,7 +133,7 @@ pub fn selections_creases(
             continue;
         }
 
-        for (buffer_snapshot, buffer_range) in buffer_ranges {
+        for (buffer_snapshot, buffer_range, _) in buffer_ranges {
             creases.extend(crease_for_buffer_range(&buffer_snapshot, buffer_range, cx));
         }
     }
