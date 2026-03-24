@@ -387,7 +387,7 @@ pub fn initialize_workspace(
                 }
                 cx.spawn(async move |cx| {
                     cx.background_executor()
-                        .timer(Duration::from_millis(501))
+                        .timer(std::time::Duration::from_millis(1500))
                         .await;
 
                     multi_workspace_handle.assert_released();
