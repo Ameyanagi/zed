@@ -27507,7 +27507,7 @@ impl EditorSnapshot {
                         end_row.0 += 1;
                     }
                     let is_created_file = hunk.is_created_file();
-                    let multi_buffer_range = hunk.multi_buffer_range();
+                    let multi_buffer_range = hunk.multi_buffer_range.clone();
 
                     DisplayDiffHunk::Unfolded {
                         status: hunk.status(),

@@ -139,8 +139,7 @@ pub struct MultiBufferDiffHunk {
     /// The word diffs for this hunk.
     pub word_diffs: Vec<Range<MultiBufferOffset>>,
     pub excerpt_range: ExcerptRange<text::Anchor>,
-    // FIXME get rid of
-    path_key_index: PathKeyIndex,
+    pub multi_buffer_range: Range<Anchor>,
 }
 
 impl MultiBufferDiffHunk {
@@ -152,12 +151,6 @@ impl MultiBufferDiffHunk {
         self.diff_base_byte_range == (BufferOffset(0)..BufferOffset(0))
             && self.buffer_range.start.is_min()
             && self.buffer_range.end.is_max()
-    }
-
-    pub fn multi_buffer_range(&self) -> Range<Anchor> {
-        let start = Anchor::in_buffer(self.path_key_index, self.buffer_range.start);
-        let end = Anchor::in_buffer(self.path_key_index, self.buffer_range.end);
-        start..end
     }
 }
 
@@ -629,6 +622,7 @@ pub struct MultiBufferSnapshot {
     excerpts: SumTree<Excerpt>,
     buffers: TreeMap<BufferId, BufferStateSnapshot>,
     path_keys_by_index: TreeMap<PathKeyIndex, PathKey>,
+    indices_by_path_key: TreeMap<PathKey, PathKeyIndex>,
     diffs: TreeMap<BufferId, DiffStateSnapshot>,
     diff_transforms: SumTree<DiffTransform>,
     non_text_state_update_count: usize,
@@ -688,15 +682,12 @@ impl std::hash::Hash for DiffTransformHunkInfo {
 pub struct ExcerptBoundaryInfo {
     // todo!() do we need the buffer?
     pub buffer: BufferSnapshot,
-    path_key_index: PathKeyIndex,
+    pub start_anchor: Anchor,
     pub range: ExcerptRange<text::Anchor>,
     pub end_row: MultiBufferRow,
 }
 
 impl ExcerptBoundaryInfo {
-    pub fn start_anchor(&self) -> Anchor {
-        Anchor::in_buffer(self.path_key_index, self.start_text_anchor())
-    }
     pub fn start_text_anchor(&self) -> text::Anchor {
         self.range.context.start
     }
@@ -717,7 +708,7 @@ impl std::fmt::Debug for ExcerptBoundaryInfo {
 
 impl PartialEq for ExcerptBoundaryInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.path_key_index == other.path_key_index && self.range == other.range
+        self.start_anchor == other.start_anchor && self.range == other.range
     }
 }
 
@@ -1758,6 +1749,7 @@ impl MultiBuffer {
             use_extended_diff_range: _,
             show_headers: _,
             path_keys_by_index: _,
+            indices_by_path_key: _,
             buffers,
         } = self.snapshot.get_mut();
         let start = ExcerptDimension(MultiBufferOffset::ZERO);
@@ -1805,7 +1797,6 @@ impl MultiBuffer {
     }
 
     // If point is at the end of the buffer, the last excerpt is returned
-    #[deprecated(note = "FIXME")]
     pub fn point_to_buffer_offset<T: ToOffset>(
         &self,
         point: T,
@@ -2365,7 +2356,7 @@ impl MultiBuffer {
                     dbg!("HERE not expanding");
                     continue;
                 }
-                let hunk_range = diff_hunk.multi_buffer_range();
+                let hunk_range = diff_hunk.multi_buffer_range;
                 if let Some(excerpt_start_anchor) =
                     snapshot.buffer_anchor_to_anchor(diff_hunk.excerpt_range.context.start)
                     && hunk_range.start.to_point(snapshot) < excerpt_start_anchor.to_point(snapshot)
@@ -2473,6 +2464,7 @@ impl MultiBuffer {
             diffs: buffer_diff,
             buffers: buffer_snapshots,
             path_keys_by_index: _,
+            indices_by_path_key: _,
             diff_transforms: _,
             non_text_state_update_count,
             edit_count,
@@ -3254,7 +3246,6 @@ impl MultiBuffer {
                         Some(dbg!(ExcerptRange::new(start_ix..end_ix)))
                     })
                     .collect::<Vec<_>>();
-                // todo!() mutate excerpts more realistically?
                 log::info!(
                     "Inserting excerpts from buffer {} and ranges {:?}: {:?}",
                     buffer_handle.read(cx).remote_id(),
@@ -3486,6 +3477,8 @@ impl MultiBufferSnapshot {
             } else {
                 DiffHunkStatusKind::Modified
             };
+            let multi_buffer_range =
+                Anchor::range_in_buffer(excerpt.path_key_index, buffer_range.clone());
             Some(MultiBufferDiffHunk {
                 row_range: MultiBufferRow(range.start.row)..MultiBufferRow(end_row),
                 buffer_id: buffer_snapshot.remote_id(),
@@ -3498,7 +3491,7 @@ impl MultiBufferSnapshot {
                     secondary: hunk.secondary_status,
                 },
                 excerpt_range: excerpt.range.clone(),
-                path_key_index: excerpt.path_key_index,
+                multi_buffer_range,
             })
         })
     }
@@ -5497,14 +5490,20 @@ impl MultiBufferSnapshot {
                 };
 
                 let prev = prev_excerpt.as_ref().map(|excerpt| ExcerptBoundaryInfo {
-                    path_key_index: excerpt.path_key_index,
+                    start_anchor: Anchor::in_buffer(
+                        excerpt.path_key_index,
+                        excerpt.range.context.start,
+                    ),
                     buffer: excerpt.buffer_snapshot(self).clone(),
                     range: excerpt.range.clone(),
                     end_row: MultiBufferRow(next_region_start.row),
                 });
 
                 let next = ExcerptBoundaryInfo {
-                    path_key_index: next_excerpt.path_key_index,
+                    start_anchor: Anchor::in_buffer(
+                        next_excerpt.path_key_index,
+                        next_excerpt.range.context.start,
+                    ),
                     buffer: next_excerpt.buffer_snapshot(self).clone(),
                     range: next_excerpt.range.clone(),
                     end_row: if next_excerpt.has_trailing_newline {

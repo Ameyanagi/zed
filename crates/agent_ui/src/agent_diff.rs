@@ -194,7 +194,7 @@ impl AgentDiffPane {
                         .next();
 
                     if let Some(first_hunk) = first_hunk {
-                        let first_hunk_start = first_hunk.multi_buffer_range().start;
+                        let first_hunk_start = first_hunk.multi_buffer_range.start;
                         editor.change_selections(Default::default(), window, cx, |selections| {
                             selections.select_anchor_ranges([first_hunk_start..first_hunk_start]);
                         })
@@ -258,7 +258,7 @@ impl AgentDiffPane {
                     .next();
 
                 if let Some(first_hunk) = first_hunk {
-                    let first_hunk_start = first_hunk.multi_buffer_range().start;
+                    let first_hunk_start = first_hunk.multi_buffer_range.start;
                     editor.change_selections(Default::default(), window, cx, |selections| {
                         selections.select_anchor_ranges([first_hunk_start..first_hunk_start]);
                     })
@@ -464,7 +464,7 @@ fn update_editor_selection(
         diff_hunks
             .last()
             .and_then(|last_kept_hunk| {
-                let last_kept_hunk_end = last_kept_hunk.multi_buffer_range().end;
+                let last_kept_hunk_end = last_kept_hunk.multi_buffer_range.end;
                 editor
                     .diff_hunks_in_ranges(
                         &[last_kept_hunk_end..editor::Anchor::max()],
@@ -474,7 +474,7 @@ fn update_editor_selection(
             })
             .or_else(|| {
                 let first_kept_hunk = diff_hunks.first()?;
-                let first_kept_hunk_start = first_kept_hunk.multi_buffer_range().start;
+                let first_kept_hunk_start = first_kept_hunk.multi_buffer_range.start;
                 editor
                     .diff_hunks_in_ranges(
                         &[editor::Anchor::min()..first_kept_hunk_start],
@@ -486,7 +486,7 @@ fn update_editor_selection(
 
     if let Some(target_hunk) = target_hunk {
         editor.change_selections(Default::default(), window, cx, |selections| {
-            let next_hunk_start = target_hunk.multi_buffer_range().start;
+            let next_hunk_start = target_hunk.multi_buffer_range.start;
             selections.select_anchor_ranges([next_hunk_start..next_hunk_start]);
         })
     }
@@ -1572,7 +1572,7 @@ impl AgentDiff {
                     editor.update(cx, |editor, cx| {
                         let snapshot = multibuffer.read(cx).snapshot(cx);
                         if let Some(first_hunk) = snapshot.diff_hunks().next() {
-                            let first_hunk_start = first_hunk.multi_buffer_range().start;
+                            let first_hunk_start = first_hunk.multi_buffer_range.start;
 
                             editor.change_selections(
                                 SelectionEffects::scroll(Autoscroll::center()),

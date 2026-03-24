@@ -362,14 +362,14 @@ impl Block {
             Block::ExcerptBoundary {
                 excerpt: next_excerpt,
                 ..
-            } => BlockId::ExcerptBoundary(next_excerpt.start_anchor()),
+            } => BlockId::ExcerptBoundary(next_excerpt.start_anchor),
             Block::FoldedBuffer { first_excerpt, .. } => {
                 BlockId::FoldedBuffer(first_excerpt.buffer_id())
             }
             Block::BufferHeader {
                 excerpt: next_excerpt,
                 ..
-            } => BlockId::ExcerptBoundary(next_excerpt.start_anchor()),
+            } => BlockId::ExcerptBoundary(next_excerpt.start_anchor),
             Block::Spacer { id, .. } => BlockId::Spacer(*id),
         }
     }

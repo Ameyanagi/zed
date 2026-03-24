@@ -300,14 +300,8 @@ impl MultiBuffer {
 
     pub(crate) fn get_or_create_path_key_index(&mut self, path_key: &PathKey) -> PathKeyIndex {
         let mut snapshot = self.snapshot.borrow_mut();
-        let existing = snapshot
-            .path_keys_by_index
-            .iter()
-            // todo!() perf? (but ExcerptIdMapping was doing this)
-            .find(|(_, existing_path)| existing_path == &path_key)
-            .map(|(index, _)| *index);
 
-        if let Some(existing) = existing {
+        if let Some(&existing) = snapshot.indices_by_path_key.get(path_key) {
             return existing;
         }
 
@@ -317,6 +311,7 @@ impl MultiBuffer {
             .map(|(index, _)| PathKeyIndex(index.0 + 1))
             .unwrap_or(PathKeyIndex(0));
         snapshot.path_keys_by_index.insert(index, path_key.clone());
+        snapshot.indices_by_path_key.insert(path_key.clone(), index);
         index
     }
 
