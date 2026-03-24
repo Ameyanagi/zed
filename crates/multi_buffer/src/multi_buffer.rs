@@ -5499,12 +5499,6 @@ impl MultiBufferSnapshot {
             return None;
         }
         let input_buffer_end = cursor.buffer_position_at(&position.end)?;
-
-        let output_len = position.end - position.start;
-        let buffer_len = input_buffer_end - input_buffer_start;
-        if output_len != buffer_len {
-            return None;
-        }
         let input_buffer_range = input_buffer_start..input_buffer_end;
         let buffer = excerpt.buffer_snapshot(self);
         let excerpt_context_range = excerpt.range.context.to_offset(buffer);
