@@ -5197,19 +5197,6 @@ impl MultiBufferSnapshot {
         }
     }
 
-    /// Creates a multibuffer anchor range for the given buffer anchor range, if any excerpt contains both endpoints
-    /// and there are no intervening deleted hunks
-    pub fn anchor_range_in_buffer(
-        &self,
-        text_anchor: Range<text::Anchor>,
-    ) -> Option<Range<Anchor>> {
-        if text_anchor.start.buffer_id != text_anchor.end.buffer_id {
-            return None;
-        }
-        let path_key_index = self.path_key_index_for_buffer(text_anchor.start.buffer_id)?;
-        Some(Anchor::range_in_buffer(path_key_index, text_anchor))
-    }
-
     /// Lifts a buffer anchor to a multibuffer anchor without checking against excerpt boundaries. Returns `None` if there are no excerpts for the buffer
     pub fn anchor_in_buffer(&self, anchor: text::Anchor) -> Option<Anchor> {
         let path_key_index = self.path_key_index_for_buffer(anchor.buffer_id)?;
@@ -5489,7 +5476,7 @@ impl MultiBufferSnapshot {
     /// and the input range both converted to buffer coordinates. The buffer ranges returned by the callback are lifted back
     /// to multibuffer offsets and returned.
     ///
-    /// Returns `None` if the input range spans multiple excerpts or if it has a nonempty intersection with a deleted hunk.
+    /// Returns `None` if the input range spans multiple excerpts.
     /// When lifting buffer ranges back to multibuffer offsets, does not include deleted hunks at the endpoints, and yields `None`
     /// if there would be internal deleted hunks in the multibuffer offset range. Thus, the successfully lifted ranges always
     /// have the same length as their original buffer ranges.
@@ -6274,27 +6261,29 @@ impl MultiBufferSnapshot {
 
     pub fn outline(&self, theme: Option<&SyntaxTheme>) -> Option<Outline<Anchor>> {
         let buffer_snapshot = self.as_singleton()?;
+        let excerpt = self.excerpts.first()?;
+        let path_key_index = excerpt.path_key_index;
         let outline = buffer_snapshot.outline(theme);
         Some(Outline::new(
             outline
                 .items
                 .into_iter()
-                .flat_map(|item| {
-                    Some(OutlineItem {
-                        depth: item.depth,
-                        range: self.anchor_range_in_buffer(item.range)?,
-                        source_range_for_text: self
-                            .anchor_range_in_buffer(item.source_range_for_text)?,
-                        text: item.text,
-                        highlight_ranges: item.highlight_ranges,
-                        name_ranges: item.name_ranges,
-                        body_range: item
-                            .body_range
-                            .and_then(|body_range| self.anchor_range_in_buffer(body_range)),
-                        annotation_range: item.annotation_range.and_then(|annotation_range| {
-                            self.anchor_range_in_buffer(annotation_range)
-                        }),
-                    })
+                .map(|item| OutlineItem {
+                    depth: item.depth,
+                    range: Anchor::range_in_buffer(path_key_index, item.range),
+                    source_range_for_text: Anchor::range_in_buffer(
+                        path_key_index,
+                        item.source_range_for_text,
+                    ),
+                    text: item.text,
+                    highlight_ranges: item.highlight_ranges,
+                    name_ranges: item.name_ranges,
+                    body_range: item
+                        .body_range
+                        .map(|body_range| Anchor::range_in_buffer(path_key_index, body_range)),
+                    annotation_range: item.annotation_range.map(|annotation_range| {
+                        Anchor::range_in_buffer(path_key_index, annotation_range)
+                    }),
                 })
                 .collect(),
         ))
@@ -6643,19 +6632,6 @@ impl MultiBufferSnapshot {
             snapshot,
             range.start.text_anchor_in(snapshot)..range.end.text_anchor_in(snapshot),
         ))
-    }
-
-    /// Returns all nonempty intersections of the given buffer range with excerpts in the multibuffer in order
-    pub fn buffer_range_to_range<T: text::ToOffset>(
-        &self,
-        range: Range<T>,
-        buffer: &BufferSnapshot,
-    ) -> Option<Range<MultiBufferOffset>> {
-        let start = range.start.to_offset(buffer);
-        let end = range.end.to_offset(buffer);
-        let text_anchor_range = buffer.anchor_after(start)..buffer.anchor_before(end);
-        let mb_anchor_range = self.anchor_range_in_buffer(text_anchor_range)?;
-        Some(mb_anchor_range.to_offset(self))
     }
 
     /// Returns all nonempty intersections of the given buffer range with excerpts in the multibuffer in order.

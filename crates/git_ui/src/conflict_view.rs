@@ -173,7 +173,7 @@ fn conflicts_updated(
         let mut removed_highlighted_ranges = Vec::new();
         let mut removed_block_ids = HashSet::default();
         for (conflict_range, block_id) in old_conflicts {
-            let Some(range) = snapshot.anchor_range_in_buffer(conflict_range) else {
+            let Some(range) = snapshot.buffer_anchor_range_to_anchor_range(conflict_range) else {
                 continue;
             };
             removed_highlighted_ranges.push(range.clone());
@@ -242,9 +242,9 @@ fn update_conflict_highlighting(
 ) -> Option<()> {
     log::debug!("update conflict highlighting for {conflict:?}");
 
-    let outer = buffer.anchor_range_in_buffer(conflict.range.clone())?;
-    let ours = buffer.anchor_range_in_buffer(conflict.ours.clone())?;
-    let theirs = buffer.anchor_range_in_buffer(conflict.theirs.clone())?;
+    let outer = buffer.buffer_anchor_range_to_anchor_range(conflict.range.clone())?;
+    let ours = buffer.buffer_anchor_range_to_anchor_range(conflict.ours.clone())?;
+    let theirs = buffer.buffer_anchor_range_to_anchor_range(conflict.theirs.clone())?;
 
     let ours_background = cx.theme().colors().version_control_conflict_marker_ours;
     let theirs_background = cx.theme().colors().version_control_conflict_marker_theirs;
@@ -383,7 +383,8 @@ pub(crate) fn resolve_conflict(
                     })
                     .ok()?;
                 let &(_, block_id) = &state.block_ids[ix];
-                let range = snapshot.anchor_range_in_buffer(resolved_conflict.range)?;
+                let range =
+                    snapshot.buffer_anchor_range_to_anchor_range(resolved_conflict.range)?;
 
                 editor.remove_gutter_highlights::<ConflictsOuter>(vec![range.clone()], cx);
 

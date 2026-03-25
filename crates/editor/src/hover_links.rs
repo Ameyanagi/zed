@@ -362,7 +362,8 @@ pub fn show_link_definition(
                     if let Some((url_range, url)) = find_url(&buffer, anchor, cx.clone()) {
                         this.read_with(cx, |_, _| {
                             let range = maybe!({
-                                let range = snapshot.anchor_range_in_buffer(url_range)?;
+                                let range =
+                                    snapshot.buffer_anchor_range_to_anchor_range(url_range)?;
                                 Some(RangeInEditor::Text(range))
                             });
                             (range, vec![HoverLink::Url(url)])
@@ -372,7 +373,8 @@ pub fn show_link_definition(
                         find_file(&buffer, project.clone(), anchor, cx).await
                     {
                         let range = maybe!({
-                            let range = snapshot.anchor_range_in_buffer(filename_range)?;
+                            let range =
+                                snapshot.buffer_anchor_range_to_anchor_range(filename_range)?;
                             Some(RangeInEditor::Text(range))
                         });
 
@@ -387,7 +389,9 @@ pub fn show_link_definition(
                                     definition_result.iter().find_map(|link| {
                                         link.origin.as_ref().and_then(|origin| {
                                             let range = snapshot
-                                                .anchor_range_in_buffer(origin.range.clone())?;
+                                                .buffer_anchor_range_to_anchor_range(
+                                                    origin.range.clone(),
+                                                )?;
                                             Some(RangeInEditor::Text(range))
                                         })
                                     }),

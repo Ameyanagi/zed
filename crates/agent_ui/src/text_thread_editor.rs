@@ -648,9 +648,7 @@ impl TextThreadEditor {
                 if let Some((crease_id, start)) = self.pending_thought_process.take() {
                     self.editor.update(cx, |editor, cx| {
                         let multi_buffer_snapshot = editor.buffer().read(cx).snapshot(cx);
-                        let start_anchor = multi_buffer_snapshot
-                            .anchor_in_excerpt(start)
-                            .unwrap();
+                        let start_anchor = multi_buffer_snapshot.anchor_in_excerpt(start).unwrap();
 
                         editor.display_map.update(cx, |display_map, cx| {
                             display_map.unfold_intersecting(
@@ -741,7 +739,7 @@ impl TextThreadEditor {
                             };
 
                             let range = buffer
-                                .anchor_range_in_buffer(command.source_range.clone())
+                                .buffer_anchor_range_to_anchor_range(command.source_range.clone())
                                 .unwrap();
                             Crease::inline(range, placeholder, render_toggle, render_trailer)
                         }),
@@ -813,7 +811,7 @@ impl TextThreadEditor {
                     let buffer = editor.buffer().read(cx).snapshot(cx);
 
                     let range = buffer
-                        .anchor_range_in_buffer(invoked_slash_command.range.clone())
+                        .buffer_anchor_range_to_anchor_range(invoked_slash_command.range.clone())
                         .unwrap();
                     editor.remove_folds_with_type(
                         &[range],
@@ -832,7 +830,7 @@ impl TextThreadEditor {
                     let buffer = editor.buffer().read(cx).snapshot(cx);
                     let context = self.text_thread.downgrade();
                     let range = buffer
-                        .anchor_range_in_buffer(invoked_slash_command.range.clone())
+                        .buffer_anchor_range_to_anchor_range(invoked_slash_command.range.clone())
                         .unwrap();
                     let crease = Crease::inline(
                         range,
@@ -872,7 +870,9 @@ impl TextThreadEditor {
             let mut buffer_rows_to_fold = BTreeSet::new();
             let mut creases = Vec::new();
             for (section, status) in sections {
-                let range = buffer.anchor_range_in_buffer(section.range).unwrap();
+                let range = buffer
+                    .buffer_anchor_range_to_anchor_range(section.range)
+                    .unwrap();
                 let buffer_row = MultiBufferRow(range.start.to_point(&buffer).row);
                 buffer_rows_to_fold.insert(buffer_row);
                 creases.push(
@@ -918,7 +918,9 @@ impl TextThreadEditor {
             let mut buffer_rows_to_fold = BTreeSet::new();
             let mut creases = Vec::new();
             for section in sections {
-                let range = buffer.anchor_range_in_buffer(section.range).unwrap();
+                let range = buffer
+                    .buffer_anchor_range_to_anchor_range(section.range)
+                    .unwrap();
                 let buffer_row = MultiBufferRow(range.start.to_point(&buffer).row);
                 buffer_rows_to_fold.insert(buffer_row);
                 creases.push(

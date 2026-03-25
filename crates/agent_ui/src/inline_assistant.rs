@@ -1977,7 +1977,7 @@ impl CodeActionProvider for AssistantCodeActionProvider {
                     editor.buffer().update(cx, |multibuffer, cx| {
                         let buffer = buffer.read(cx);
                         let multibuffer_snapshot = multibuffer.read(cx);
-                        multibuffer_snapshot.anchor_range_in_buffer(action.range)
+                        multibuffer_snapshot.buffer_anchor_range_to_anchor_range(action.range)
                     })
                 })
                 .context("invalid range")?;

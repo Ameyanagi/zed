@@ -356,7 +356,7 @@ impl SyntaxTreeView {
         // Build a multibuffer anchor range.
         let multibuffer = editor_state.editor.read(cx).buffer();
         let multibuffer = multibuffer.read(cx).snapshot(cx);
-        let range = multibuffer.anchor_range_in_buffer(range)?;
+        let range = multibuffer.buffer_anchor_range_to_anchor_range(range)?;
         let key = cx.entity_id().as_u64() as usize;
 
         // Update the editor with the anchor range.

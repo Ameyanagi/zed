@@ -6481,7 +6481,7 @@ impl Editor {
         let newest_selection = self.selections.newest_anchor();
 
         let Some(replace_range_multibuffer) =
-            multibuffer_snapshot.anchor_range_in_buffer(replace_range.clone())
+            multibuffer_snapshot.buffer_anchor_range_to_anchor_range(replace_range.clone())
         else {
             return None;
         };
@@ -7049,7 +7049,9 @@ impl Editor {
                     .edited_ranges_for_transaction::<usize>(transaction)
                     .all(|range| {
                         multibuffer_snapshot
-                            .anchor_range_in_buffer(buffer_snapshot.anchor_range_inside(range))
+                            .buffer_anchor_range_to_anchor_range(
+                                buffer_snapshot.anchor_range_inside(range),
+                            )
                             .is_some()
                     })
             });
@@ -8635,7 +8637,10 @@ impl Editor {
         let edits = edits
             .into_iter()
             .flat_map(|(range, new_text)| {
-                Some((multibuffer.anchor_range_in_buffer(range)?, new_text))
+                Some((
+                    multibuffer.buffer_anchor_range_to_anchor_range(range)?,
+                    new_text,
+                ))
             })
             .collect::<Vec<_>>();
         if edits.is_empty() {

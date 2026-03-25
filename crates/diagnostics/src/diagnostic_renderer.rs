@@ -292,7 +292,7 @@ impl DiagnosticBlock {
                 let multibuffer = editor.buffer().read(cx);
                 if let Some(anchor_range) = multibuffer
                     .snapshot(cx)
-                    .anchor_range_in_buffer(diagnostic.range)
+                    .buffer_anchor_range_to_anchor_range(diagnostic.range)
                 {
                     Self::jump_to(editor, anchor_range, window, cx);
                     return;

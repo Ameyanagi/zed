@@ -221,13 +221,16 @@ impl Editor {
                                 let color_start = point_from_lsp(color.lsp_range.start);
                                 let color_end = point_from_lsp(color.lsp_range.end);
 
-                                let Some(range) = multi_buffer_snapshot.anchor_range_in_buffer(
-                                    buffer_snapshot.anchor_range_outside(
-                                        buffer_snapshot.clip_point_utf16(color_start, Bias::Left)
-                                            ..buffer_snapshot
-                                                .clip_point_utf16(color_end, Bias::Right),
-                                    ),
-                                ) else {
+                                let Some(range) = multi_buffer_snapshot
+                                    .buffer_anchor_range_to_anchor_range(
+                                        buffer_snapshot.anchor_range_outside(
+                                            buffer_snapshot
+                                                .clip_point_utf16(color_start, Bias::Left)
+                                                ..buffer_snapshot
+                                                    .clip_point_utf16(color_end, Bias::Right),
+                                        ),
+                                    )
+                                else {
                                     continue;
                                 };
 

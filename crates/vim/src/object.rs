@@ -210,20 +210,13 @@ fn find_mini_delimiters(
     let visible_line_range = get_visible_line_range(&line_range);
 
     let snapshot = &map.buffer_snapshot();
-    let (buffer, buffer_offset_range) =
-        snapshot.range_to_buffer_range::<MultiBufferOffset>(offset..offset)?;
-    let buffer_offset = buffer_offset_range.start;
-
-    let bracket_filter = |open: Range<usize>, close: Range<usize>| {
-        is_valid_delimiter(buffer, open.start, close.start)
-    };
 
     let ranges = map
         .buffer_snapshot()
         .bracket_ranges(visible_line_range)
         .map(|ranges| {
             ranges.filter_map(|(open, close)| {
-                let (_, buffer_open) =
+                let (buffer, buffer_open) =
                     snapshot.range_to_buffer_range::<MultiBufferOffset>(open.clone())?;
                 let (_, buffer_close) =
                     snapshot.range_to_buffer_range::<MultiBufferOffset>(close.clone())?;
@@ -246,13 +239,31 @@ fn find_mini_delimiters(
         );
     }
 
-    let (open_bracket, close_bracket) = buffer
-        .innermost_enclosing_bracket_ranges(buffer_offset..buffer_offset, Some(&bracket_filter))?;
+    let results = snapshot.map_excerpt_ranges(offset..offset, |buffer, _, input_range| {
+        let buffer_offset = input_range.start.0;
+        let bracket_filter = |open: Range<usize>, close: Range<usize>| {
+            is_valid_delimiter(buffer, open.start, close.start)
+        };
+        let Some((open, close)) = buffer.innermost_enclosing_bracket_ranges(
+            buffer_offset..buffer_offset,
+            Some(&bracket_filter),
+        ) else {
+            return vec![];
+        };
+        vec![
+            (BufferOffset(open.start)..BufferOffset(open.end), ()),
+            (BufferOffset(close.start)..BufferOffset(close.end), ()),
+        ]
+    })?;
+
+    if results.len() < 2 {
+        return None;
+    }
 
     Some(
         DelimiterRange {
-            open: snapshot.buffer_range_to_range(open_bracket.clone(), buffer)?,
-            close: snapshot.buffer_range_to_range(close_bracket.clone(), buffer)?,
+            open: results[0].0.clone()?,
+            close: results[1].0.clone()?,
         }
         .to_display_range(map, around),
     )

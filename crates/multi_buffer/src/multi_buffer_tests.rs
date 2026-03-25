@@ -2224,9 +2224,38 @@ fn test_stale_anchor_after_buffer_removal_and_path_reuse(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-async fn test_map_excerpt_ranges_with_deleted_hunks(cx: &mut TestAppContext) {
-    let base_text = "aaa\nbbb\nccc\nddd\neee\n";
-    let text = "aaa\nBBB\neee\n";
+async fn test_map_excerpt_ranges(cx: &mut TestAppContext) {
+    let base_text = indoc!(
+        "
+        {
+          (aaa)
+          (bbb)
+          (ccc)
+        }
+        xxx
+        yyy
+        zzz
+        [
+          (ddd)
+          (EEE)
+        ]
+        "
+    );
+    let text = indoc!(
+        "
+        {
+          (aaa)
+          (CCC)
+        }
+        xxx
+        yyy
+        zzz
+        [
+          (ddd)
+          (EEE)
+        ]
+        "
+    );
 
     let buffer = cx.new(|cx| Buffer::local(text, cx));
     let diff = cx
@@ -2238,7 +2267,10 @@ async fn test_map_excerpt_ranges_with_deleted_hunks(cx: &mut TestAppContext) {
         multibuffer.set_excerpts_for_path(
             PathKey::sorted(0),
             buffer.clone(),
-            [Point::zero()..buffer.read(cx).max_point()],
+            [
+                Point::new(0, 0)..Point::new(3, 1),
+                Point::new(7, 0)..Point::new(10, 1),
+            ],
             0,
             cx,
         );
@@ -2251,49 +2283,113 @@ async fn test_map_excerpt_ranges_with_deleted_hunks(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
 
-    let buffer_id = buffer.read_with(cx, |buffer, _| buffer.remote_id());
-
     let snapshot = multibuffer.read_with(cx, |multibuffer, cx| multibuffer.snapshot(cx));
 
-    let result = snapshot.map_excerpt_ranges(
-        snapshot.point_to_offset(Point::new(0, 0))..snapshot.point_to_offset(Point::new(0, 0)),
-        |_buf, _excerpt_range, input_buffer_range| vec![(input_buffer_range.clone(), ())],
+    let actual_diff = format_diff(
+        &snapshot.text(),
+        &snapshot.row_infos(MultiBufferRow(0)).collect::<Vec<_>>(),
+        &Default::default(),
+        None,
     );
-    let result = result.expect("range in main buffer text should return Some");
-    assert!(
-        result[0].0.is_some(),
-        "mapped range in main buffer text should be Some"
-    );
-
-    let mut deleted_row = None;
-    for row in 0..=snapshot.max_row().0 {
-        if let Some((buf, _range)) = snapshot.buffer_line_for_row(MultiBufferRow(row)) {
-            if buf.remote_id() != buffer_id {
-                deleted_row = Some(row);
-                break;
-            }
-        }
-    }
-    let deleted_row = deleted_row.expect("should find a row belonging to the diff base");
-    let result = snapshot.map_excerpt_ranges(
-        snapshot.point_to_offset(Point::new(deleted_row, 0))
-            ..snapshot.point_to_offset(Point::new(deleted_row, 0)),
-        |_buf, _excerpt_range, input_buffer_range| vec![(input_buffer_range.clone(), ())],
-    );
-    assert!(
-        result.is_none(),
-        "range inside a deleted hunk should return None"
+    pretty_assertions::assert_eq!(
+        actual_diff,
+        indoc!(
+            "
+              {
+                (aaa)
+            -   (bbb)
+            -   (ccc)
+            +   (CCC)
+              } [\u{2193}]
+              [ [\u{2191}]
+                (ddd)
+                (EEE)
+              ] [\u{2193}]"
+        )
     );
 
-    let buffer_len = buffer.read_with(cx, |buf, _| BufferOffset(buf.len()));
-    let result = snapshot.map_excerpt_ranges(
-        snapshot.point_to_offset(Point::new(0, 0))..snapshot.point_to_offset(Point::new(0, 0)),
-        |_buf, _excerpt_range, _input_buffer_range| vec![(BufferOffset(0)..buffer_len, ())],
+    assert_eq!(
+        snapshot.map_excerpt_ranges(
+            snapshot.point_to_offset(Point::new(1, 3))..snapshot.point_to_offset(Point::new(1, 3)),
+            |buffer, excerpt_range, input_range| {
+                assert_eq!(
+                    buffer.offset_to_point(input_range.start.0)
+                        ..buffer.offset_to_point(input_range.end.0),
+                    Point::new(1, 3)..Point::new(1, 3),
+                );
+                assert_eq!(
+                    buffer.offset_to_point(excerpt_range.context.start.0)
+                        ..buffer.offset_to_point(excerpt_range.context.end.0),
+                    Point::new(0, 0)..Point::new(3, 1),
+                );
+                vec![
+                    (input_range.start..BufferOffset(input_range.start.0 + 3), ()),
+                    (excerpt_range.context.clone(), ()),
+                    (
+                        BufferOffset(text::ToOffset::to_offset(&Point::new(2, 2), buffer))
+                            ..BufferOffset(text::ToOffset::to_offset(&Point::new(2, 7), buffer)),
+                        (),
+                    ),
+                    (
+                        BufferOffset(text::ToOffset::to_offset(&Point::new(0, 0), buffer))
+                            ..BufferOffset(text::ToOffset::to_offset(&Point::new(2, 0), buffer)),
+                        (),
+                    ),
+                ]
+            },
+        ),
+        Some(vec![
+            (
+                Some(
+                    snapshot.point_to_offset(Point::new(1, 3))
+                        ..snapshot.point_to_offset(Point::new(1, 6)),
+                ),
+                (),
+            ),
+            (None, ()),
+            (
+                Some(
+                    snapshot.point_to_offset(Point::new(4, 2))
+                        ..snapshot.point_to_offset(Point::new(4, 7)),
+                ),
+                (),
+            ),
+            (None, ()),
+        ]),
     );
-    let result = result.expect("range in main buffer text should return Some");
-    assert!(
-        result[0].0.is_none(),
-        "buffer range spanning a deleted hunk should map to None"
+
+    assert_eq!(
+        snapshot.map_excerpt_ranges(
+            snapshot.point_to_offset(Point::new(5, 0))..snapshot.point_to_offset(Point::new(7, 0)),
+            |_, _, range| vec![(range, ())],
+        ),
+        None,
+    );
+
+    assert_eq!(
+        snapshot.map_excerpt_ranges(
+            snapshot.point_to_offset(Point::new(7, 3))..snapshot.point_to_offset(Point::new(7, 6)),
+            |buffer, excerpt_range, input_range| {
+                assert_eq!(
+                    buffer.offset_to_point(input_range.start.0)
+                        ..buffer.offset_to_point(input_range.end.0),
+                    Point::new(8, 3)..Point::new(8, 6),
+                );
+                assert_eq!(
+                    buffer.offset_to_point(excerpt_range.context.start.0)
+                        ..buffer.offset_to_point(excerpt_range.context.end.0),
+                    Point::new(7, 0)..Point::new(10, 1),
+                );
+                vec![(input_range.clone(), ())]
+            },
+        ),
+        Some(vec![(
+            Some(
+                snapshot.point_to_offset(Point::new(7, 3))
+                    ..snapshot.point_to_offset(Point::new(7, 6)),
+            ),
+            (),
+        )]),
     );
 }
 

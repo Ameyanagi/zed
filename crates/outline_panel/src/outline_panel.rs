@@ -3273,7 +3273,8 @@ impl OutlinePanel {
             .into_iter()
             .flat_map(|buffer| buffer.iter_outlines())
             .flat_map(|outline| {
-                let range = multi_buffer_snapshot.anchor_range_in_buffer(outline.range.clone())?;
+                let range = multi_buffer_snapshot
+                    .buffer_anchor_range_to_anchor_range(outline.range.clone())?;
                 Some((
                     range.start.to_display_point(&editor_snapshot)
                         ..range.end.to_display_point(&editor_snapshot),
@@ -3359,8 +3360,9 @@ impl OutlinePanel {
                 self.cached_entries.iter().rev().find_map(|cached_entry| {
                     match &cached_entry.entry {
                         PanelEntry::Outline(OutlineEntry::Excerpt(excerpt)) => {
-                            if let Some(buffer_snapshot) =
-                                self.buffer_snapshot_for_id(excerpt.context.start.buffer_id, cx)
+                            if excerpt.context.start.buffer_id == selection_anchor.buffer_id
+                                && let Some(buffer_snapshot) =
+                                    self.buffer_snapshot_for_id(excerpt.context.start.buffer_id, cx)
                                 && excerpt.contains(&selection_anchor, &buffer_snapshot)
                             {
                                 Some(cached_entry.entry.clone())
@@ -3380,8 +3382,9 @@ impl OutlinePanel {
                                 ..
                             }),
                         ) => {
-                            if let Some(buffer_snapshot) =
-                                self.buffer_snapshot_for_id(*file_buffer_id, cx)
+                            if *file_buffer_id == selection_anchor.buffer_id
+                                && let Some(buffer_snapshot) =
+                                    self.buffer_snapshot_for_id(*file_buffer_id, cx)
                                 && file_excerpts.iter().any(|excerpt| {
                                     excerpt.contains(&selection_anchor, &buffer_snapshot)
                                 })

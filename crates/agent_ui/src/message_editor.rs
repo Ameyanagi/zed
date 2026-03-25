@@ -1644,7 +1644,7 @@ mod tests {
         editor.update_in(cx, |editor, window, cx| {
             let snapshot = editor.buffer().read(cx).snapshot(cx);
             let range = snapshot
-                .anchor_range_in_buffer(completion.replace_range)
+                .buffer_anchor_range_to_anchor_range(completion.replace_range)
                 .unwrap();
             editor.edit([(range, completion.new_text)], cx);
             (completion.confirm.unwrap())(CompletionIntent::Complete, window, cx);
