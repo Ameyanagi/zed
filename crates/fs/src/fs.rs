@@ -218,9 +218,8 @@ impl TrashedEntry {
             id: self.id,
             name: self.name,
             original_parent: self.original_parent,
-            // TODO!: Figure out if `time_deleted` is relevant for the restore
-            // functionality, in which case we probably want to also preserve it
-            // in the `From<trash::TrashItem> for TrashedEntry` implementation.
+            // `TrashedEntry` doesn't preserve `time_deleted` as we don't
+            // currently need it for restore, so we default it to 0 here.
             time_deleted: 0,
         }
     }
