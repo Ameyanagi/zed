@@ -9,12 +9,15 @@ use agent_ui::{
     Agent, AgentPanel, AgentPanelEvent, DEFAULT_THREAD_TITLE, NewThread, RemoveSelectedThread,
 };
 use chrono::Utc;
+use db::kvp::KeyValueStore;
 use editor::Editor;
 use feature_flags::{AgentV2FeatureFlag, FeatureFlagViewExt as _};
+
 use gpui::{
     Action as _, AnyElement, App, Context, Entity, FocusHandle, Focusable, ListState, Pixels,
-    Render, SharedString, WeakEntity, Window, WindowHandle, list, prelude::*, px,
+    Render, SharedString, Task, WeakEntity, Window, WindowHandle, list, prelude::*, px,
 };
+
 use menu::{
     Cancel, Confirm, SelectChild, SelectFirst, SelectLast, SelectNext, SelectParent, SelectPrevious,
 };
@@ -22,8 +25,10 @@ use project::{AgentId, Event as ProjectEvent, linked_worktree_short_name};
 use recent_projects::sidebar_recent_projects::SidebarRecentProjects;
 use ui::utils::platform_title_bar_height;
 
+use serde::{Deserialize, Serialize};
 use settings::Settings as _;
 use std::collections::{HashMap, HashSet};
+
 use std::mem;
 use std::path::Path;
 use std::rc::Rc;
@@ -33,11 +38,13 @@ use ui::{
     AgentThreadStatus, CommonAnimationExt, ContextMenu, Divider, HighlightedLabel, KeyBinding,
     PopoverMenu, PopoverMenuHandle, Tab, ThreadItem, TintColor, Tooltip, WithScrollbar, prelude::*,
 };
-use util::ResultExt as _;
 use util::path_list::PathList;
+use util::{ResultExt as _, TryFutureExt as _};
+
 use workspace::{
     AddFolderToProject, FocusWorkspaceSidebar, MultiWorkspace, MultiWorkspaceEvent, Open,
-    Sidebar as WorkspaceSidebar, ToggleWorkspaceSidebar, Workspace, WorkspaceId,
+    SerializedPathList, Sidebar as WorkspaceSidebar, ToggleWorkspaceSidebar, Workspace,
+    WorkspaceId,
 };
 
 use zed_actions::OpenRecent;
@@ -59,12 +66,20 @@ const DEFAULT_WIDTH: Pixels = px(300.0);
 const MIN_WIDTH: Pixels = px(200.0);
 const MAX_WIDTH: Pixels = px(800.0);
 const DEFAULT_THREADS_SHOWN: usize = 5;
+const SIDEBAR_COLLAPSED_GROUPS_NAMESPACE: &str = "agents_sidebar_collapsed_groups";
+const SIDEBAR_COLLAPSED_GROUPS_KEY: &str = "global";
 
 #[derive(Debug, Default)]
 enum SidebarView {
     #[default]
     ThreadList,
     Archive(Entity<ThreadsArchiveView>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializedSidebarState {
+    #[serde(default)]
+    collapsed_groups: Vec<SerializedPathList>,
 }
 
 #[derive(Clone, Debug)]
@@ -226,7 +241,24 @@ fn workspace_label_from_path_list(path_list: &PathList) -> SharedString {
     }
 }
 
+fn load_collapsed_groups(kvp: &KeyValueStore) -> HashSet<PathList> {
+    kvp.scoped(SIDEBAR_COLLAPSED_GROUPS_NAMESPACE)
+        .read(SIDEBAR_COLLAPSED_GROUPS_KEY)
+        .log_err()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<SerializedSidebarState>(&json).log_err())
+        .map(|state| {
+            state
+                .collapsed_groups
+                .into_iter()
+                .map(|path_list| PathList::deserialize(&path_list))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The sidebar re-derives its entire entry list from scratch on every
+
 /// change via `update_entries` → `rebuild_contents`. Avoid adding
 /// incremental or inter-event coordination state — if something can
 /// be computed from the current world state, compute it in the rebuild.
@@ -237,6 +269,7 @@ pub struct Sidebar {
     filter_editor: Entity<Editor>,
     list_state: ListState,
     contents: SidebarContents,
+
     /// The index of the list item that currently has the keyboard focus
     ///
     /// Note: This is NOT the same as the active item.
@@ -251,6 +284,8 @@ pub struct Sidebar {
     hovered_thread_index: Option<usize>,
     collapsed_groups: HashSet<PathList>,
     expanded_groups: HashMap<PathList, usize>,
+    pending_serialization: Task<Option<()>>,
+
     view: SidebarView,
     recent_projects_popover_handle: PopoverMenuHandle<SidebarRecentProjects>,
     project_header_menu_ix: Option<usize>,
@@ -321,6 +356,8 @@ impl Sidebar {
         })
         .detach();
 
+        let collapsed_groups = load_collapsed_groups(&KeyValueStore::global(cx));
+
         let workspaces = multi_workspace.read(cx).workspaces().to_vec();
         cx.defer_in(window, move |this, window, cx| {
             for workspace in &workspaces {
@@ -341,8 +378,10 @@ impl Sidebar {
             agent_panel_visible: false,
             active_thread_is_draft: false,
             hovered_thread_index: None,
-            collapsed_groups: HashSet::new(),
+            collapsed_groups,
             expanded_groups: HashMap::new(),
+            pending_serialization: Task::ready(None),
+
             view: SidebarView::default(),
             recent_projects_popover_handle: PopoverMenuHandle::default(),
             project_header_menu_ix: None,
@@ -1430,7 +1469,7 @@ impl Sidebar {
                                 move |this, _, window, cx| {
                                     // Uncollapse the group if collapsed so
                                     // the new-thread entry becomes visible.
-                                    this.collapsed_groups.remove(&path_list_for_new_thread);
+                                    this.set_group_collapsed(&path_list_for_new_thread, false, cx);
                                     this.selection = None;
                                     this.create_new_thread(&workspace_for_new_thread, window, cx);
                                 }
@@ -1778,17 +1817,60 @@ impl Sidebar {
         });
     }
 
+    fn set_group_collapsed(
+        &mut self,
+        path_list: &PathList,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let changed = if collapsed {
+            self.collapsed_groups.insert(path_list.clone())
+        } else {
+            self.collapsed_groups.remove(path_list)
+        };
+
+        if changed {
+            self.serialize_collapsed_groups(cx);
+        }
+    }
+
+    fn clear_collapsed_groups(&mut self, cx: &mut Context<Self>) {
+        if self.collapsed_groups.is_empty() {
+            return;
+        }
+
+        self.collapsed_groups.clear();
+        self.serialize_collapsed_groups(cx);
+    }
+
+    fn serialize_collapsed_groups(&mut self, cx: &mut Context<Self>) {
+        let collapsed_groups = self
+            .collapsed_groups
+            .iter()
+            .map(PathList::serialize)
+            .collect::<Vec<_>>();
+        let kvp = KeyValueStore::global(cx);
+        self.pending_serialization = cx.background_spawn(
+            async move {
+                kvp.scoped(SIDEBAR_COLLAPSED_GROUPS_NAMESPACE)
+                    .write(
+                        SIDEBAR_COLLAPSED_GROUPS_KEY.to_string(),
+                        serde_json::to_string(&SerializedSidebarState { collapsed_groups })?,
+                    )
+                    .await?;
+                anyhow::Ok(())
+            }
+            .log_err(),
+        );
+    }
+
     fn toggle_collapse(
         &mut self,
         path_list: &PathList,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.collapsed_groups.contains(path_list) {
-            self.collapsed_groups.remove(path_list);
-        } else {
-            self.collapsed_groups.insert(path_list.clone());
-        }
+        self.set_group_collapsed(path_list, !self.collapsed_groups.contains(path_list), cx);
         self.update_entries(cx);
     }
 
@@ -2244,7 +2326,7 @@ impl Sidebar {
             Some(ListEntry::ProjectHeader { path_list, .. }) => {
                 if self.collapsed_groups.contains(path_list) {
                     let path_list = path_list.clone();
-                    self.collapsed_groups.remove(&path_list);
+                    self.set_group_collapsed(&path_list, false, cx);
                     self.update_entries(cx);
                 } else if ix + 1 < self.contents.entries.len() {
                     self.selection = Some(ix + 1);
@@ -2268,7 +2350,7 @@ impl Sidebar {
             Some(ListEntry::ProjectHeader { path_list, .. }) => {
                 if !self.collapsed_groups.contains(path_list) {
                     let path_list = path_list.clone();
-                    self.collapsed_groups.insert(path_list);
+                    self.set_group_collapsed(&path_list, true, cx);
                     self.update_entries(cx);
                 }
             }
@@ -2281,7 +2363,7 @@ impl Sidebar {
                     {
                         let path_list = path_list.clone();
                         self.selection = Some(i);
-                        self.collapsed_groups.insert(path_list);
+                        self.set_group_collapsed(&path_list, true, cx);
                         self.update_entries(cx);
                         break;
                     }
@@ -2319,10 +2401,10 @@ impl Sidebar {
             {
                 let path_list = path_list.clone();
                 if self.collapsed_groups.contains(&path_list) {
-                    self.collapsed_groups.remove(&path_list);
+                    self.set_group_collapsed(&path_list, false, cx);
                 } else {
                     self.selection = Some(header_ix);
-                    self.collapsed_groups.insert(path_list);
+                    self.set_group_collapsed(&path_list, true, cx);
                 }
                 self.update_entries(cx);
             }
@@ -2335,10 +2417,14 @@ impl Sidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let mut did_change = false;
         for entry in &self.contents.entries {
             if let ListEntry::ProjectHeader { path_list, .. } = entry {
-                self.collapsed_groups.insert(path_list.clone());
+                did_change |= self.collapsed_groups.insert(path_list.clone());
             }
+        }
+        if did_change {
+            self.serialize_collapsed_groups(cx);
         }
         self.update_entries(cx);
     }
@@ -2349,7 +2435,7 @@ impl Sidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.collapsed_groups.clear();
+        self.clear_collapsed_groups(cx);
         self.update_entries(cx);
     }
 
@@ -3221,6 +3307,8 @@ impl Render for Sidebar {
 mod tests {
     use super::*;
     use acp_thread::StubAgentConnection;
+    use db::AppDatabase;
+
     use agent::ThreadStore;
     use agent_ui::test_support::{active_session_id, open_thread_with_connection, send_message};
     use assistant_text_thread::TextThreadStore;
@@ -3237,7 +3325,9 @@ mod tests {
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
+            cx.set_global(AppDatabase::test_new());
             theme::init(theme::LoadThemes::JustBase, cx);
+
             editor::init(cx);
             cx.update_flags(false, vec!["agent-v2".into()]);
             ThreadStore::init_global(cx);
@@ -3747,6 +3837,34 @@ mod tests {
         assert_eq!(
             visible_entries_as_strings(&sidebar, cx),
             vec!["v [my-project]", "  Thread 1"]
+        );
+    }
+
+    #[gpui::test]
+    async fn test_collapsed_groups_restore_after_restart(cx: &mut TestAppContext) {
+        let project = init_test_project("/my-project", cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let sidebar = setup_sidebar(&multi_workspace, cx);
+
+        let path_list = PathList::new(&[std::path::PathBuf::from("/my-project")]);
+        save_n_test_threads(1, &path_list, cx).await;
+
+        multi_workspace.update_in(cx, |_, _window, cx| cx.notify());
+        cx.run_until_parked();
+
+        sidebar.update_in(cx, |s, window, cx| {
+            s.toggle_collapse(&path_list, window, cx);
+        });
+        cx.run_until_parked();
+
+        let restored_sidebar = setup_sidebar(&multi_workspace, cx);
+        multi_workspace.update_in(cx, |_, _window, cx| cx.notify());
+        cx.run_until_parked();
+
+        assert_eq!(
+            visible_entries_as_strings(&restored_sidebar, cx),
+            vec!["> [my-project]"]
         );
     }
 
