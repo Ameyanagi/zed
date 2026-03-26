@@ -37,12 +37,10 @@ pub fn init(cx: &mut App) {
 }
 
 /// Migrate existing thread metadata from native agent thread store to the new metadata storage.
-/// We migrate the last 10 threads per project and skip threads that do not have a project.
+/// We skip migrating threads that do not have a project.
 ///
 /// TODO: Remove this after N weeks of shipping the sidebar
 fn migrate_thread_metadata(cx: &mut App) {
-    const MAX_MIGRATED_THREADS_PER_PROJECT: usize = 10;
-
     let store = SidebarThreadMetadataStore::global(cx);
     let db = store.read(cx).db.clone();
 
@@ -52,8 +50,6 @@ fn migrate_thread_metadata(cx: &mut App) {
         }
 
         let metadata = store.read_with(cx, |_store, app| {
-            let mut migrated_threads_per_project = HashMap::default();
-
             ThreadStore::global(app)
                 .read(app)
                 .entries()
@@ -61,14 +57,6 @@ fn migrate_thread_metadata(cx: &mut App) {
                     if entry.folder_paths.is_empty() {
                         return None;
                     }
-
-                    let migrated_thread_count = migrated_threads_per_project
-                        .entry(entry.folder_paths.clone())
-                        .or_insert(0);
-                    if *migrated_thread_count >= MAX_MIGRATED_THREADS_PER_PROJECT {
-                        return None;
-                    }
-                    *migrated_thread_count += 1;
 
                     Some(ThreadMetadata {
                         session_id: entry.id,
