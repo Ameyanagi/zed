@@ -425,7 +425,21 @@ impl Editor {
         let buffers = if visible_only {
             self.visible_buffers(cx)
                 .into_iter()
-                // FIXME the lsp filtering that was there before
+                .filter_map(|buffer| {
+                    let project = self.project()?;
+                    let buffer_file = project::File::from_dyn(buffer.read(cx).file())?;
+                    let buffer_worktree = project
+                        .read(cx)
+                        .worktree_for_id(buffer_file.worktree_id(cx), cx)?;
+                    let worktree_entry = buffer_worktree
+                        .read(cx)
+                        .entry_for_id(buffer_file.project_entry_id()?)?;
+                    if worktree_entry.is_ignored {
+                        None
+                    } else {
+                        Some(buffer)
+                    }
+                })
                 .collect()
         } else {
             self.buffer().read(cx).all_buffers()
