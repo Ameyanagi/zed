@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
+use crate::agent_connection_store::AgentConnectionStore;
 use crate::thread_metadata_store::{SidebarThreadMetadataStore, ThreadMetadata};
-use crate::{
-    RemoveSelectedThread, agent_connection_store::AgentConnectionStore,
-    thread_history::ThreadHistory,
-};
 use agent::ThreadStore;
-use agent_client_protocol as acp;
 use agent_settings::AgentSettings;
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, TimeDelta, Utc};
 use editor::Editor;
@@ -21,8 +17,8 @@ use project::AgentServerStore;
 use settings::Settings as _;
 use theme::ActiveTheme;
 use ui::{
-    CommonAnimationExt, ContextMenu, Divider, HighlightedLabel, KeyBinding, PopoverMenuHandle,
-    Tooltip, WithScrollbar, prelude::*, utils::platform_title_bar_height,
+    Divider, HighlightedLabel, KeyBinding, Tooltip, WithScrollbar, prelude::*,
+    utils::platform_title_bar_height,
 };
 use zed_actions::agents_sidebar::FocusSidebarFilter;
 use zed_actions::editor::{MoveDown, MoveUp};
@@ -93,22 +89,6 @@ fn fuzzy_match_positions(query: &str, text: &str) -> Option<Vec<usize>> {
     }
 }
 
-fn archive_empty_state_message(
-    has_history: bool,
-    is_empty: bool,
-    has_query: bool,
-) -> Option<&'static str> {
-    if !is_empty {
-        None
-    } else if !has_history {
-        Some("This agent does not support viewing archived threads.")
-    } else if has_query {
-        Some("No threads match your search.")
-    } else {
-        Some("No archived threads yet.")
-    }
-}
-
 pub enum ThreadsArchiveViewEvent {
     Close,
     Unarchive { thread: ThreadMetadata },
@@ -117,11 +97,6 @@ pub enum ThreadsArchiveViewEvent {
 impl EventEmitter<ThreadsArchiveViewEvent> for ThreadsArchiveView {}
 
 pub struct ThreadsArchiveView {
-    agent_connection_store: Entity<AgentConnectionStore>,
-    agent_server_store: Entity<AgentServerStore>,
-    thread_store: Entity<ThreadStore>,
-    fs: Arc<dyn Fs>,
-    history: Option<Entity<ThreadHistory>>,
     _history_subscription: Subscription,
     focus_handle: FocusHandle,
     list_state: ListState,
@@ -130,9 +105,7 @@ pub struct ThreadsArchiveView {
     hovered_index: Option<usize>,
     filter_editor: Entity<Editor>,
     _subscriptions: Vec<gpui::Subscription>,
-    selected_agent_menu: PopoverMenuHandle<ContextMenu>,
     _refresh_history_task: Task<()>,
-    is_loading: bool,
 }
 
 impl ThreadsArchiveView {
@@ -172,6 +145,13 @@ impl ThreadsArchiveView {
         )
         .detach();
 
+        let thread_metadata_store_subscription = cx.observe(
+            &SidebarThreadMetadataStore::global(cx),
+            |this: &mut Self, _, cx| {
+                this.update_items(cx);
+            },
+        );
+
         cx.on_focus_out(&focus_handle, window, |this: &mut Self, _, _window, cx| {
             this.selection = None;
             cx.notify();
@@ -179,11 +159,6 @@ impl ThreadsArchiveView {
         .detach();
 
         let mut this = Self {
-            agent_connection_store,
-            agent_server_store,
-            thread_store,
-            fs,
-            history: None,
             _history_subscription: Subscription::new(|| {}),
             focus_handle,
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)),
@@ -191,10 +166,11 @@ impl ThreadsArchiveView {
             selection: None,
             hovered_index: None,
             filter_editor,
-            _subscriptions: vec![filter_editor_subscription],
-            selected_agent_menu: PopoverMenuHandle::default(),
+            _subscriptions: vec![
+                filter_editor_subscription,
+                thread_metadata_store_subscription,
+            ],
             _refresh_history_task: Task::ready(()),
-            is_loading: true,
         };
         this.update_items(cx);
         this
@@ -276,40 +252,6 @@ impl ThreadsArchiveView {
         self.selection = None;
         self.reset_filter_editor_text(window, cx);
         cx.emit(ThreadsArchiveViewEvent::Unarchive { thread });
-    }
-
-    fn delete_thread(&mut self, session_id: &acp::SessionId, cx: &mut Context<Self>) {
-        let Some(history) = &self.history else {
-            return;
-        };
-        if !history.read(cx).supports_delete() {
-            return;
-        }
-        let session_id = session_id.clone();
-        history.update(cx, |history, cx| {
-            history
-                .delete_session(&session_id, cx)
-                .detach_and_log_err(cx);
-        });
-    }
-
-    fn remove_selected_thread(
-        &mut self,
-        _: &RemoveSelectedThread,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(ix) = self.selection else {
-            return;
-        };
-        let Some(ArchiveListItem::Entry {
-            thread: session, ..
-        }) = self.items.get(ix)
-        else {
-            return;
-        };
-        let session_id = session.session_id.clone();
-        self.delete_thread(&session_id, cx);
     }
 
     fn is_selectable_item(&self, ix: usize) -> bool {
@@ -651,30 +593,18 @@ impl Focusable for ThreadsArchiveView {
     }
 }
 
-impl ThreadsArchiveView {
-    fn empty_state_message(&self, is_empty: bool, has_query: bool) -> Option<&'static str> {
-        archive_empty_state_message(self.history.is_some(), is_empty, has_query)
-    }
-}
-
 impl Render for ThreadsArchiveView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_empty = self.items.is_empty();
         let has_query = !self.filter_editor.read(cx).text(cx).is_empty();
 
-        let content = if self.is_loading {
-            v_flex()
-                .flex_1()
-                .justify_center()
-                .items_center()
-                .child(
-                    Icon::new(IconName::LoadCircle)
-                        .size(IconSize::Small)
-                        .color(Color::Muted)
-                        .with_rotate_animation(2),
-                )
-                .into_any_element()
-        } else if let Some(message) = self.empty_state_message(is_empty, has_query) {
+        let content = if is_empty {
+            let message = if has_query {
+                "No threads match your search."
+            } else {
+                "No archived threads yet."
+            };
+
             v_flex()
                 .flex_1()
                 .justify_center()
@@ -711,44 +641,8 @@ impl Render for ThreadsArchiveView {
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
             .on_action(cx.listener(Self::confirm))
-            .on_action(cx.listener(Self::remove_selected_thread))
             .size_full()
             .child(self.render_header(window, cx))
             .child(content)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::archive_empty_state_message;
-
-    #[test]
-    fn empty_state_message_returns_none_when_archive_has_items() {
-        assert_eq!(archive_empty_state_message(false, false, false), None);
-        assert_eq!(archive_empty_state_message(true, false, true), None);
-    }
-
-    #[test]
-    fn empty_state_message_distinguishes_unsupported_history() {
-        assert_eq!(
-            archive_empty_state_message(false, true, false),
-            Some("This agent does not support viewing archived threads.")
-        );
-        assert_eq!(
-            archive_empty_state_message(false, true, true),
-            Some("This agent does not support viewing archived threads.")
-        );
-    }
-
-    #[test]
-    fn empty_state_message_distinguishes_empty_history_and_search_results() {
-        assert_eq!(
-            archive_empty_state_message(true, true, false),
-            Some("No archived threads yet.")
-        );
-        assert_eq!(
-            archive_empty_state_message(true, true, true),
-            Some("No threads match your search.")
-        );
     }
 }

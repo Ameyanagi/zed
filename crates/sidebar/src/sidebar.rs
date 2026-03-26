@@ -2446,7 +2446,7 @@ impl Sidebar {
         }
 
         SidebarThreadMetadataStore::global(cx)
-            .update(cx, |store, cx| store.delete(session_id.clone(), cx));
+            .update(cx, |store, cx| store.archive(session_id.clone(), cx));
     }
 
     fn remove_selected_thread(
