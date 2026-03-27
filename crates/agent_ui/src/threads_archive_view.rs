@@ -15,7 +15,7 @@ use gpui::{
 };
 use itertools::Itertools as _;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
-use project::{AgentId, AgentServerStore, Project};
+use project::{AgentId, AgentServerStore};
 use settings::Settings as _;
 use std::collections::HashSet;
 use theme::ActiveTheme;
