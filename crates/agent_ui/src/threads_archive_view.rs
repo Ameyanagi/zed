@@ -208,7 +208,8 @@ impl ThreadsArchiveView {
 
             let entry_bucket = {
                 let entry_date = session
-                    .updated_at
+                    .created_at
+                    .unwrap_or(session.updated_at)
                     .with_timezone(&Local)
                     .naive_local()
                     .date();
