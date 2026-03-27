@@ -55,7 +55,7 @@ Open the profiler (tracy-profiler), you should see zed in the list of `Discovere
 
 <img width="392" height="auto" alt="image" src="https://github.com/user-attachments/assets/b6f06fc3-6b25-41c7-ade9-558cc93d6033" />
 
-Tracy is an increadibly powerful profiler which can do a lot however it's UI is not that friendly. This is not the place for an in depth guide to Tracy, I do however want to highlight one particular workflow that is helpful when figuring out why a piece of code is _sometimes_ slow.
+Tracy is an incredibly powerful profiler which can do a lot however it's UI is not that friendly. This is not the place for an in depth guide to Tracy, I do however want to highlight one particular workflow that is helpful when figuring out why a piece of code is _sometimes_ slow.
 
 Here are the steps:
 
@@ -67,7 +67,7 @@ Here are the steps:
 6. Scroll to zoom in and see more detail about the callers
 7. Click on a caller to to get statistics on _it_.
 
-While normally the blue bars in the Tracy timeline corrospond to function calls they can time any part of a codebase. In the example below we have added an extra span "for block in edits" and added metadata to it: the block_height. You can do that like this:
+While normally the blue bars in the Tracy timeline correspond to function calls they can time any part of a codebase. In the example below we have added an extra span "for block in edits" and added metadata to it: the block_height. You can do that like this:
 
 ```rust
 let span = ztracing::debug_span!("for block in edits", block_height = block.height());
