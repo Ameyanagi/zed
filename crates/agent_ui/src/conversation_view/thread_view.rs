@@ -5165,6 +5165,12 @@ impl ThreadView {
     }
 
     pub(crate) fn auto_expand_streaming_thought(&mut self, cx: &mut Context<Self>) {
+        // Only auto-expand thinking blocks in Automatic mode.
+        // AlwaysExpanded shows them open by default; AlwaysCollapsed keeps them closed.
+        if AgentSettings::get_global(cx).thinking_display != ThinkingBlockDisplay::Automatic {
+            return;
+        }
+
         let key = {
             let thread = self.thread.read(cx);
             if thread.status() != ThreadStatus::Generating {
@@ -5200,17 +5206,39 @@ impl ThreadView {
     }
 
     fn toggle_thinking_block_expansion(&mut self, key: (usize, usize), cx: &mut Context<Self>) {
-        let is_user_expanded = self.user_toggled_thinking_blocks.contains(&key);
-        let is_in_expanded_set = self.expanded_thinking_blocks.contains(&key);
+        let thinking_display = AgentSettings::get_global(cx).thinking_display;
 
-        if is_user_expanded {
-            self.user_toggled_thinking_blocks.remove(&key);
-            self.expanded_thinking_blocks.remove(&key);
-        } else if is_in_expanded_set {
-            self.user_toggled_thinking_blocks.insert(key);
-        } else {
-            self.expanded_thinking_blocks.insert(key);
-            self.user_toggled_thinking_blocks.insert(key);
+        match thinking_display {
+            ThinkingBlockDisplay::Automatic => {
+                let is_user_expanded = self.user_toggled_thinking_blocks.contains(&key);
+                let is_in_expanded_set = self.expanded_thinking_blocks.contains(&key);
+
+                if is_user_expanded {
+                    self.user_toggled_thinking_blocks.remove(&key);
+                    self.expanded_thinking_blocks.remove(&key);
+                } else if is_in_expanded_set {
+                    self.user_toggled_thinking_blocks.insert(key);
+                } else {
+                    self.expanded_thinking_blocks.insert(key);
+                    self.user_toggled_thinking_blocks.insert(key);
+                }
+            }
+            ThinkingBlockDisplay::AlwaysExpanded => {
+                if self.user_toggled_thinking_blocks.contains(&key) {
+                    self.user_toggled_thinking_blocks.remove(&key);
+                } else {
+                    self.user_toggled_thinking_blocks.insert(key);
+                }
+            }
+            ThinkingBlockDisplay::AlwaysCollapsed => {
+                if self.user_toggled_thinking_blocks.contains(&key) {
+                    self.user_toggled_thinking_blocks.remove(&key);
+                    self.expanded_thinking_blocks.remove(&key);
+                } else {
+                    self.expanded_thinking_blocks.insert(key);
+                    self.user_toggled_thinking_blocks.insert(key);
+                }
+            }
         }
 
         cx.notify();
@@ -5229,10 +5257,20 @@ impl ThreadView {
 
         let key = (entry_ix, chunk_ix);
 
-        let is_user_expanded = self.user_toggled_thinking_blocks.contains(&key);
+        let thinking_display = AgentSettings::get_global(cx).thinking_display;
+        let is_user_toggled = self.user_toggled_thinking_blocks.contains(&key);
         let is_in_expanded_set = self.expanded_thinking_blocks.contains(&key);
-        let is_open = is_user_expanded || is_in_expanded_set;
-        let is_constrained = is_in_expanded_set && !is_user_expanded;
+
+        let (is_open, is_constrained) = match thinking_display {
+            ThinkingBlockDisplay::Automatic => {
+                let is_open = is_user_toggled || is_in_expanded_set;
+                let is_constrained = is_in_expanded_set && !is_user_toggled;
+                (is_open, is_constrained)
+            }
+            ThinkingBlockDisplay::AlwaysExpanded => (!is_user_toggled, false),
+            ThinkingBlockDisplay::AlwaysCollapsed => (is_user_toggled, false),
+        };
+
         let should_auto_scroll = self.auto_expanded_thinking_block == Some(key);
 
         let scroll_handle = self
