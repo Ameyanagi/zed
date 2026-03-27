@@ -7,8 +7,19 @@ pub struct HighlightMap(Arc<[Option<HighlightId>]>);
 pub struct HighlightId(NonZeroU32);
 
 impl HighlightId {
+    pub const TABSTOP_INSERT_ID: HighlightId =
+        unsafe { HighlightId(NonZeroU32::new_unchecked(u32::MAX - 1)) };
+    pub const TABSTOP_REPLACE_ID: HighlightId =
+        unsafe { HighlightId(NonZeroU32::new_unchecked(u32::MAX - 2)) };
+
     pub fn new(capture_id: u32) ->  Self {
         Self(NonZeroU32::new(capture_id + 1).unwrap_or(NonZeroU32::MAX))
+    }
+}
+
+impl From<HighlightId> for usize {
+    fn from(value: HighlightId) -> Self {
+        value.0.get() as usize - 1
     }
 }
 
@@ -24,21 +35,8 @@ impl HighlightMap {
     }
 }
 
-impl HighlightId {
-    pub const TABSTOP_INSERT_ID: HighlightId =
-        unsafe { HighlightId(NonZeroU32::new_unchecked(u32::MAX - 1)) };
-    pub const TABSTOP_REPLACE_ID: HighlightId =
-        unsafe { HighlightId(NonZeroU32::new_unchecked(u32::MAX - 2)) };
-}
-
 impl Default for HighlightMap {
     fn default() -> Self {
         Self(Arc::new([]))
-    }
-}
-
-impl From<HighlightId> for usize {
-    fn from(value: HighlightId) -> Self {
-        value.0.get() as usize - 1
     }
 }
