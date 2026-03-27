@@ -337,7 +337,7 @@ impl DevContainerManifest {
         let image_tag =
             self.generate_features_image_tag(dockerfile_path.clone().display().to_string());
 
-        let mut build_info = FeaturesBuildInfo {
+        let build_info = FeaturesBuildInfo {
             dockerfile_path,
             features_content_dir,
             empty_context_dir,
