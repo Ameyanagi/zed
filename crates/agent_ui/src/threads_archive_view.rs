@@ -435,6 +435,7 @@ impl ThreadsArchiveView {
                     }))
                     .action_slot(
                         h_flex()
+                            .gap_2()
                             .when(is_hovered || is_focused, |this| {
                                 let focus_handle = self.focus_handle.clone();
                                 this.child(
