@@ -19,7 +19,7 @@ use gpui::{
 use menu::{
     Cancel, Confirm, SelectChild, SelectFirst, SelectLast, SelectNext, SelectParent, SelectPrevious,
 };
-use project::{AgentId, Event as ProjectEvent, linked_worktree_short_name};
+use project::{Event as ProjectEvent, linked_worktree_short_name};
 use recent_projects::sidebar_recent_projects::SidebarRecentProjects;
 use ui::utils::platform_title_bar_height;
 
@@ -306,12 +306,9 @@ impl Sidebar {
         })
         .detach();
 
-        cx.observe(
-            &ThreadMetadataStore::global(cx),
-            |this, _store, cx| {
-                this.update_entries(cx);
-            },
-        )
+        cx.observe(&ThreadMetadataStore::global(cx), |this, _store, cx| {
+            this.update_entries(cx);
+        })
         .detach();
 
         cx.observe_flag::<AgentV2FeatureFlag, _>(window, |_is_enabled, this, _window, cx| {
@@ -733,19 +730,16 @@ impl Sidebar {
                     thread_store.read(cx).entries_for_path(&path_list).collect();
                 for row in workspace_rows {
                     seen_session_ids.insert(row.session_id.clone());
-                    let (agent, icon, icon_from_external_svg) = match &row.agent_id {
-                        None => (Agent::NativeAgent, IconName::ZedAgent, None),
-                        Some(id) => {
-                            let custom_icon = agent_server_store
-                                .as_ref()
-                                .and_then(|store| store.read(cx).agent_icon(&id));
-                            (
-                                Agent::Custom { id: id.clone() },
-                                IconName::Terminal,
-                                custom_icon,
-                            )
-                        }
+
+                    let agent = Agent::from(row.agent_id.clone());
+                    let icon = match agent {
+                        Agent::NativeAgent => IconName::ZedAgent,
+                        Agent::Custom { .. } => IconName::Terminal,
                     };
+                    let icon_from_external_svg = agent_server_store
+                        .as_ref()
+                        .and_then(|store| store.read(cx).agent_icon(&row.agent_id));
+
                     threads.push(ThreadEntry {
                         agent,
                         session_info: acp_thread::AgentSessionInfo {
@@ -816,22 +810,15 @@ impl Sidebar {
                             if !seen_session_ids.insert(row.session_id.clone()) {
                                 continue;
                             }
-                            let (agent, icon, icon_from_external_svg) = match &row.agent_id {
-                                None => (Agent::NativeAgent, IconName::ZedAgent, None),
-                                Some(name) => {
-                                    let custom_icon =
-                                        agent_server_store.as_ref().and_then(|store| {
-                                            store.read(cx).agent_icon(&AgentId(name.clone().into()))
-                                        });
-                                    (
-                                        Agent::Custom {
-                                            id: AgentId::new(name.clone()),
-                                        },
-                                        IconName::Terminal,
-                                        custom_icon,
-                                    )
-                                }
+                            let agent = Agent::from(row.agent_id.clone());
+                            let icon = match agent {
+                                Agent::NativeAgent => IconName::ZedAgent,
+                                Agent::Custom { .. } => IconName::Terminal,
                             };
+                            let icon_from_external_svg = agent_server_store
+                                .as_ref()
+                                .and_then(|store| store.read(cx).agent_icon(&row.agent_id));
+
                             threads.push(ThreadEntry {
                                 agent,
                                 session_info: acp_thread::AgentSessionInfo {
@@ -2426,8 +2413,7 @@ impl Sidebar {
             }
         }
 
-        ThreadMetadataStore::global(cx)
-            .update(cx, |store, cx| store.archive(session_id, cx));
+        ThreadMetadataStore::global(cx).update(cx, |store, cx| store.archive(session_id, cx));
     }
 
     fn remove_selected_thread(
@@ -3033,6 +3019,9 @@ impl Sidebar {
         }) else {
             return;
         };
+        let Some(agent_panel) = active_workspace.read(cx).panel::<AgentPanel>(cx) else {
+            return;
+        };
 
         let agent_server_store = active_workspace
             .read(cx)
@@ -3041,7 +3030,11 @@ impl Sidebar {
             .agent_server_store()
             .downgrade();
 
-        let archive_view = cx.new(|cx| ThreadsArchiveView::new(agent_server_store, window, cx));
+        let agent_connection_store = agent_panel.read(cx).connection_store().downgrade();
+
+        let archive_view = cx.new(|cx| {
+            ThreadsArchiveView::new(agent_connection_store, agent_server_store, window, cx)
+        });
         let subscription = cx.subscribe_in(
             &archive_view,
             window,
@@ -3052,10 +3045,7 @@ impl Sidebar {
                 ThreadsArchiveViewEvent::Unarchive { thread } => {
                     this.show_thread_list(window, cx);
 
-                    let agent = match thread.agent_id.clone() {
-                        Some(id) => Agent::Custom { id },
-                        None => Agent::NativeAgent,
-                    };
+                    let agent = Agent::from(thread.agent_id.clone());
                     let session_info = acp_thread::AgentSessionInfo {
                         session_id: thread.session_id.clone(),
                         work_dirs: Some(thread.folder_paths.clone()),
@@ -3283,6 +3273,7 @@ mod tests {
     use fs::FakeFs;
     use gpui::TestAppContext;
     use pretty_assertions::assert_eq;
+    use project::AgentId;
     use settings::SettingsStore;
     use std::{path::PathBuf, sync::Arc};
     use util::path_list::PathList;
@@ -3392,7 +3383,7 @@ mod tests {
     ) {
         let metadata = ThreadMetadata {
             session_id,
-            agent_id: None,
+            agent_id: AgentId::new("zed"),
             title,
             updated_at,
             created_at: None,

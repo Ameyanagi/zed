@@ -58,7 +58,7 @@ fn migrate_thread_metadata(cx: &mut App) {
 
                     Some(ThreadMetadata {
                         session_id: entry.id,
-                        agent_id: None,
+                        agent_id: ZED_AGENT_ID.clone(),
                         title: entry.title,
                         updated_at: entry.updated_at,
                         created_at: entry.created_at,
@@ -97,8 +97,7 @@ impl Global for GlobalThreadMetadataStore {}
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadMetadata {
     pub session_id: acp::SessionId,
-    /// `None` for native Zed threads, `Some("claude-code")` etc. for ACP agents.
-    pub agent_id: Option<AgentId>,
+    pub agent_id: AgentId,
     pub title: SharedString,
     pub updated_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
@@ -120,12 +119,6 @@ impl ThreadMetadata {
         let updated_at = Utc::now();
 
         let agent_id = thread_ref.connection().agent_id();
-
-        let agent_id = if agent_id.as_ref() == ZED_AGENT_ID.as_ref() {
-            None
-        } else {
-            Some(agent_id)
-        };
 
         let folder_paths = {
             let project = thread_ref.project().read(cx);
@@ -483,7 +476,11 @@ impl ThreadMetadataDb {
     /// Upsert metadata for a thread.
     pub async fn save(&self, row: ThreadMetadata) -> anyhow::Result<()> {
         let id = row.session_id.0.clone();
-        let agent_id = row.agent_id.as_ref().map(|id| id.0.to_string());
+        let agent_id = if row.agent_id.as_ref() == ZED_AGENT_ID.as_ref() {
+            None
+        } else {
+            Some(row.agent_id.to_string())
+        };
         let title = row.title.to_string();
         let updated_at = row.updated_at.to_rfc3339();
         let created_at = row.created_at.map(|dt| dt.to_rfc3339());
@@ -544,6 +541,10 @@ impl Column for ThreadMetadata {
             Column::column(statement, next)?;
         let (archived, next): (bool, i32) = Column::column(statement, next)?;
 
+        let agent_id = agent_id
+            .map(|id| AgentId::new(id))
+            .unwrap_or(ZED_AGENT_ID.clone());
+
         let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc);
         let created_at = created_at_str
             .as_deref()
@@ -563,7 +564,7 @@ impl Column for ThreadMetadata {
         Ok((
             ThreadMetadata {
                 session_id: acp::SessionId::new(id),
-                agent_id: agent_id.map(|id| AgentId::new(id)),
+                agent_id,
                 title: title.into(),
                 updated_at,
                 created_at,
@@ -619,7 +620,7 @@ mod tests {
         ThreadMetadata {
             archived: false,
             session_id: acp::SessionId::new(session_id),
-            agent_id: None,
+            agent_id: AgentId::new("zed"),
             title: title.to_string().into(),
             updated_at,
             created_at: Some(updated_at),
@@ -831,7 +832,7 @@ mod tests {
 
         let existing_metadata = ThreadMetadata {
             session_id: acp::SessionId::new("a-session-0"),
-            agent_id: None,
+            agent_id: AgentId::new("zed"),
             title: "Existing Metadata".into(),
             updated_at: now - chrono::Duration::seconds(10),
             created_at: Some(now - chrono::Duration::seconds(10)),
@@ -902,7 +903,10 @@ mod tests {
         });
 
         assert_eq!(list.len(), 3);
-        assert!(list.iter().all(|metadata| metadata.agent_id.is_none()));
+        assert!(
+            list.iter()
+                .all(|metadata| metadata.agent_id.as_ref() == "zed")
+        );
 
         let existing_metadata = list
             .iter()
@@ -945,7 +949,7 @@ mod tests {
 
         let existing_metadata = ThreadMetadata {
             session_id: acp::SessionId::new("existing-session"),
-            agent_id: None,
+            agent_id: AgentId::new("zed"),
             title: "Existing Metadata".into(),
             updated_at: existing_updated_at,
             created_at: Some(existing_updated_at),

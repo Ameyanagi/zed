@@ -1,14 +1,19 @@
+use crate::agent_connection_store::AgentConnectionStore;
 use crate::thread_metadata_store::{ThreadMetadata, ThreadMetadataStore};
+use crate::{Agent, RemoveSelectedThread};
+use agent::ThreadStore;
+use agent_client_protocol as acp;
 use agent_settings::AgentSettings;
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, TimeDelta, Utc};
 use editor::Editor;
+use fs::Fs;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ListState, Render,
     SharedString, Subscription, Task, WeakEntity, Window, list, prelude::*, px,
 };
 use itertools::Itertools as _;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
-use project::AgentServerStore;
+use project::{AgentId, AgentServerStore};
 use settings::Settings as _;
 use theme::ActiveTheme;
 use ui::ThreadItem;
@@ -101,11 +106,13 @@ pub struct ThreadsArchiveView {
     filter_editor: Entity<Editor>,
     _subscriptions: Vec<gpui::Subscription>,
     _refresh_history_task: Task<()>,
+    agent_connection_store: WeakEntity<AgentConnectionStore>,
     agent_server_store: WeakEntity<AgentServerStore>,
 }
 
 impl ThreadsArchiveView {
     pub fn new(
+        agent_connection_store: WeakEntity<AgentConnectionStore>,
         agent_server_store: WeakEntity<AgentServerStore>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -164,6 +171,7 @@ impl ThreadsArchiveView {
                 thread_metadata_store_subscription,
             ],
             _refresh_history_task: Task::ready(()),
+            agent_connection_store,
             agent_server_store,
         };
         this.update_items(cx);
@@ -376,19 +384,23 @@ impl ThreadsArchiveView {
                 let is_focused = self.selection == Some(ix);
                 let is_hovered = self.hovered_index == Some(ix);
 
+                let focus_handle = self.focus_handle.clone();
+
                 let timestamp =
                     format_history_entry_timestamp(thread.created_at.unwrap_or(thread.updated_at));
 
-                let icon_from_external_svg = thread.agent_id.as_ref().and_then(|id| {
-                    self.agent_server_store
-                        .upgrade()
-                        .and_then(|store| store.read(cx).agent_icon(id))
-                });
-                let icon = match &thread.agent_id {
-                    None => IconName::ZedAgent,
-                    Some(id) if id.as_ref() == agent::ZED_AGENT_ID.as_ref() => IconName::ZedAgent,
-                    Some(_) => IconName::Sparkle,
+                let icon_from_external_svg = self
+                    .agent_server_store
+                    .upgrade()
+                    .and_then(|store| store.read(cx).agent_icon(&thread.agent_id));
+
+                let icon = if thread.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
+                    IconName::ZedAgent
+                } else {
+                    IconName::Sparkle
                 };
+
+                let supports_delete = true; //fixme
 
                 ThreadItem::new(id, thread.title.clone())
                     .icon(icon)
@@ -433,9 +445,69 @@ impl ThreadsArchiveView {
                                 }),
                         )
                     })
+                    .when(supports_delete, |this| {
+                        let agent = thread.agent_id.clone();
+                        let session_id = thread.session_id.clone();
+                        this.action_slot(
+                            IconButton::new("delete-thread", IconName::Trash)
+                                .style(ButtonStyle::Filled)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Muted)
+                                .tooltip({
+                                    move |_window, cx| {
+                                        Tooltip::for_action_in(
+                                            "Delete Thread",
+                                            &RemoveSelectedThread,
+                                            &focus_handle,
+                                            cx,
+                                        )
+                                    }
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.delete_thread(session_id.clone(), agent.clone(), cx);
+                                    cx.stop_propagation();
+                                })),
+                        )
+                    })
                     .into_any_element()
             }
         }
+    }
+
+    fn delete_thread(
+        &mut self,
+        session_id: acp::SessionId,
+        agent: AgentId,
+        cx: &mut Context<Self>,
+    ) {
+        ThreadMetadataStore::global(cx)
+            .update(cx, |store, cx| store.delete(session_id.clone(), cx));
+
+        let agent = Agent::from(agent);
+
+        let Some(agent_connection_store) = self.agent_connection_store.upgrade() else {
+            return;
+        };
+        let fs = <dyn Fs>::global(cx);
+
+        let task = agent_connection_store.update(cx, |store, cx| {
+            store
+                .request_connection(agent.clone(), agent.server(fs, ThreadStore::global(cx)), cx)
+                .read(cx)
+                .wait_for_connection()
+        });
+        cx.spawn(async move |_this, cx| {
+            let state = task.await?;
+            let task = cx.update(|cx| {
+                if let Some(list) = state.connection.session_list(cx) {
+                    list.delete_session(&session_id, cx)
+                } else {
+                    Task::ready(Ok(()))
+                }
+            });
+            task.await
+        })
+        .detach_and_log_err(cx);
     }
 
     fn render_header(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {

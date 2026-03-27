@@ -252,6 +252,16 @@ pub enum Agent {
     },
 }
 
+impl From<AgentId> for Agent {
+    fn from(id: AgentId) -> Self {
+        if id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
+            Self::NativeAgent
+        } else {
+            Self::Custom { id }
+        }
+    }
+}
+
 impl Agent {
     pub fn id(&self) -> AgentId {
         match self {
