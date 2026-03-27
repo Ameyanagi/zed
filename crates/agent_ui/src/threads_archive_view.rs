@@ -23,7 +23,8 @@ use ui::{
     Divider, KeyBinding, Tooltip, WithScrollbar, prelude::*, utils::platform_title_bar_height,
 };
 use util::ResultExt;
-use workspace::Workspace;
+use workspace::{MultiWorkspace, Workspace};
+
 use zed_actions::agents_sidebar::FocusSidebarFilter;
 use zed_actions::editor::{MoveDown, MoveUp};
 
@@ -114,6 +115,7 @@ pub struct ThreadsArchiveView {
     agent_server_store: WeakEntity<AgentServerStore>,
     agent_registry_store: WeakEntity<AgentRegistryStore>,
     workspace: WeakEntity<Workspace>,
+    multi_workspace: WeakEntity<MultiWorkspace>,
 }
 
 impl ThreadsArchiveView {
@@ -122,6 +124,7 @@ impl ThreadsArchiveView {
         agent_server_store: WeakEntity<AgentServerStore>,
         agent_registry_store: WeakEntity<AgentRegistryStore>,
         workspace: WeakEntity<Workspace>,
+        multi_workspace: WeakEntity<MultiWorkspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -183,6 +186,7 @@ impl ThreadsArchiveView {
             agent_connection_store,
             agent_server_store,
             workspace,
+            multi_workspace,
         };
 
         this.update_items(cx);
@@ -536,10 +540,20 @@ impl ThreadsArchiveView {
             return;
         };
 
+        let workspace_handle = self.workspace.clone();
+        let multi_workspace = self.multi_workspace.clone();
+
         self.workspace
             .update(cx, |workspace, cx| {
                 workspace.toggle_modal(window, cx, |window, cx| {
-                    ThreadImportModal::new(agent_server_store, agent_registry_store, window, cx)
+                    ThreadImportModal::new(
+                        agent_server_store,
+                        agent_registry_store,
+                        workspace_handle.clone(),
+                        multi_workspace.clone(),
+                        window,
+                        cx,
+                    )
                 });
             })
             .log_err();

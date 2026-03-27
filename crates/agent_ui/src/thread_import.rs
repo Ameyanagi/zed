@@ -1,16 +1,28 @@
 use std::sync::Arc;
 
+use acp_thread::AgentSessionListRequest;
+use agent::ThreadStore;
+use agent_client_protocol as acp;
+use chrono::Utc;
 use collections::HashSet;
+use fs::Fs;
+use futures::FutureExt as _;
 use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Render, SharedString,
     Task, WeakEntity, Window,
 };
-
+use notifications::status_toast::{StatusToast, ToastIcon};
 use picker::{Picker, PickerDelegate};
 use project::{AgentId, AgentRegistryStore, AgentServerStore};
 use ui::{Checkbox, CommonAnimationExt as _, KeyBinding, ListItem, ListItemSpacing, prelude::*};
 use util::ResultExt;
-use workspace::ModalView;
+use workspace::{ModalView, MultiWorkspace, Workspace};
+
+use crate::{
+    Agent, AgentPanel,
+    agent_connection_store::AgentConnectionStore,
+    thread_metadata_store::{ThreadMetadata, ThreadMetadataStore},
+};
 
 #[derive(Clone)]
 struct AgentEntry {
@@ -21,14 +33,20 @@ struct AgentEntry {
 
 pub struct ThreadImportModal {
     picker: Entity<Picker<ThreadImportPickerDelegate>>,
-    checked_agents: HashSet<AgentId>,
+    workspace: WeakEntity<Workspace>,
+    multi_workspace: WeakEntity<MultiWorkspace>,
+    agent_ids: Vec<AgentId>,
+    unchecked_agents: HashSet<AgentId>,
     is_importing: bool,
+    last_error: Option<SharedString>,
 }
 
 impl ThreadImportModal {
     pub fn new(
         agent_server_store: Entity<AgentServerStore>,
         agent_registry_store: Entity<AgentRegistryStore>,
+        workspace: WeakEntity<Workspace>,
+        multi_workspace: WeakEntity<MultiWorkspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -64,6 +82,11 @@ impl ThreadImportModal {
             })
             .collect::<Vec<_>>();
 
+        let agent_ids = agent_entries
+            .iter()
+            .map(|entry| entry.agent_id.clone())
+            .collect::<Vec<_>>();
+
         let thread_import_modal = cx.entity().downgrade();
         let picker: Entity<Picker<ThreadImportPickerDelegate>> = cx.new(|cx| {
             Picker::uniform_list(
@@ -75,28 +98,32 @@ impl ThreadImportModal {
 
         Self {
             picker,
-            checked_agents: HashSet::default(),
+            workspace,
+            multi_workspace,
+            agent_ids,
+            unchecked_agents: HashSet::default(),
             is_importing: false,
+            last_error: None,
         }
     }
 
     fn set_agent_checked(&mut self, agent_id: AgentId, state: ToggleState, cx: &mut Context<Self>) {
         match state {
             ToggleState::Selected => {
-                self.checked_agents.insert(agent_id);
+                self.unchecked_agents.remove(&agent_id);
             }
             ToggleState::Unselected | ToggleState::Indeterminate => {
-                self.checked_agents.remove(&agent_id);
+                self.unchecked_agents.insert(agent_id);
             }
         }
         cx.notify();
     }
 
     fn toggle_agent_checked(&mut self, agent_id: AgentId, cx: &mut Context<Self>) {
-        if self.checked_agents.contains(&agent_id) {
-            self.checked_agents.remove(&agent_id);
+        if self.unchecked_agents.contains(&agent_id) {
+            self.unchecked_agents.remove(&agent_id);
         } else {
-            self.checked_agents.insert(agent_id);
+            self.unchecked_agents.insert(agent_id);
         }
         cx.notify();
     }
@@ -106,8 +133,75 @@ impl ThreadImportModal {
             return;
         }
 
+        let Some(multi_workspace) = self.multi_workspace.upgrade() else {
+            self.is_importing = false;
+            cx.notify();
+            return;
+        };
+
+        let stores = resolve_agent_connection_stores(&multi_workspace, cx);
+        if stores.is_empty() {
+            log::error!("Did not find any workspaces to import from");
+            self.is_importing = false;
+            cx.notify();
+            return;
+        }
+
         self.is_importing = true;
+        self.last_error = None;
         cx.notify();
+
+        let agent_ids = self
+            .agent_ids
+            .iter()
+            .filter(|agent_id| !self.unchecked_agents.contains(*agent_id))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let existing_sessions = ThreadMetadataStore::global(cx)
+            .read(cx)
+            .entry_ids()
+            .collect::<HashSet<_>>();
+
+        let task = find_threads_to_import(agent_ids, existing_sessions, stores, cx);
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| match result {
+                Ok(threads) => {
+                    let imported_count = threads.len();
+                    ThreadMetadataStore::global(cx)
+                        .update(cx, |store, cx| store.save_all(threads, cx));
+                    this.is_importing = false;
+                    this.last_error = None;
+                    this.show_imported_threads_toast(imported_count, cx);
+                    cx.emit(DismissEvent);
+                }
+                Err(error) => {
+                    this.is_importing = false;
+                    this.last_error = Some(error.to_string().into());
+                    cx.notify();
+                }
+            })
+        })
+        .detach_and_log_err(cx);
+    }
+
+    fn show_imported_threads_toast(&self, imported_count: usize, cx: &mut App) {
+        let message = if imported_count == 1 {
+            "Imported 1 thread.".to_string()
+        } else {
+            format!("Imported {imported_count} threads.")
+        };
+
+        self.workspace
+            .update(cx, |workspace, cx| {
+                let status_toast = StatusToast::new(message, cx, |this, _cx| {
+                    this.icon(ToastIcon::new(IconName::Check).color(Color::Success))
+                });
+
+                workspace.toggle_status_toast(status_toast, cx);
+            })
+            .log_err();
     }
 }
 
@@ -253,7 +347,7 @@ impl PickerDelegate for ThreadImportPickerDelegate {
         let is_checked = self
             .thread_import_modal
             .read_with(cx, |modal, _cx| {
-                modal.checked_agents.contains(&entry.agent_id)
+                !modal.unchecked_agents.contains(&entry.agent_id)
             })
             .ok()
             .unwrap_or(false);
@@ -312,57 +406,179 @@ impl PickerDelegate for ThreadImportPickerDelegate {
         _window: &mut Window,
         cx: &mut Context<Picker<Self>>,
     ) -> Option<AnyElement> {
-        let is_importing = self
+        let (is_importing, last_error) = self
             .thread_import_modal
             .read_with(cx, |thread_import_modal, _cx| {
-                thread_import_modal.is_importing
+                (
+                    thread_import_modal.is_importing,
+                    thread_import_modal.last_error.clone(),
+                )
             })
             .ok()
-            .unwrap_or(false);
+            .unwrap_or((false, None));
 
         Some(
             h_flex()
                 .w_full()
                 .p_1p5()
                 .gap_2()
-                .justify_end()
+                .items_center()
                 .border_t_1()
                 .border_color(cx.theme().colors().border_variant)
-                .when(is_importing, |this| {
-                    this.child(
-                        Icon::new(IconName::ArrowCircle)
-                            .size(IconSize::Small)
-                            .color(Color::Muted)
-                            .with_rotate_animation(2),
-                    )
-                })
                 .child(
-                    Button::new("import-threads", "Import Threads")
-                        .disabled(is_importing)
-                        .key_binding(
-                            KeyBinding::for_action(&menu::SecondaryConfirm, cx)
-                                .map(|kb| kb.size(rems_from_px(12.))),
-                        )
-                        .on_click({
-                            let thread_import_modal = self.thread_import_modal.clone();
-                            move |_, window, cx| {
-                                thread_import_modal
-                                    .update(cx, |thread_import_modal, cx| {
-                                        if thread_import_modal.is_importing {
-                                            return;
-                                        }
-
-                                        thread_import_modal.import_threads(
-                                            &menu::Confirm,
-                                            window,
-                                            cx,
-                                        );
-                                    })
-                                    .log_err();
-                            }
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .when_some(last_error, |this, error| {
+                            this.child(
+                                Label::new(error)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Error)
+                                    .truncate(),
+                            )
                         }),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .when(is_importing, |this| {
+                            this.child(
+                                Icon::new(IconName::ArrowCircle)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted)
+                                    .with_rotate_animation(2),
+                            )
+                        })
+                        .child(
+                            Button::new("import-threads", "Import Threads")
+                                .disabled(is_importing)
+                                .key_binding(
+                                    KeyBinding::for_action(&menu::SecondaryConfirm, cx)
+                                        .map(|kb| kb.size(rems_from_px(12.))),
+                                )
+                                .on_click({
+                                    let thread_import_modal = self.thread_import_modal.clone();
+                                    move |_, window, cx| {
+                                        thread_import_modal
+                                            .update(cx, |thread_import_modal, cx| {
+                                                if thread_import_modal.is_importing {
+                                                    return;
+                                                }
+
+                                                thread_import_modal.import_threads(
+                                                    &menu::Confirm,
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
+                                            .log_err();
+                                    }
+                                }),
+                        ),
                 )
                 .into_any_element(),
         )
     }
+}
+
+fn resolve_agent_connection_stores(
+    multi_workspace: &Entity<MultiWorkspace>,
+    cx: &App,
+) -> Vec<Entity<AgentConnectionStore>> {
+    let mut stores = Vec::new();
+    let mut included_local_store = false;
+
+    for workspace in multi_workspace.read(cx).workspaces() {
+        let workspace = workspace.read(cx);
+        let project = workspace.project().read(cx);
+
+        // We only want to include scores from one local workspace, since we
+        // know that they live on the same machine
+        let include_store = if project.is_remote() {
+            true
+        } else if project.is_local() && !included_local_store {
+            included_local_store = true;
+            true
+        } else {
+            false
+        };
+
+        if !include_store {
+            continue;
+        }
+
+        if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+            stores.push(panel.read(cx).connection_store().clone());
+        }
+    }
+
+    stores
+}
+
+fn find_threads_to_import(
+    agent_ids: Vec<AgentId>,
+    existing_sessions: HashSet<acp::SessionId>,
+    stores: Vec<Entity<AgentConnectionStore>>,
+    cx: &mut App,
+) -> Task<anyhow::Result<Vec<ThreadMetadata>>> {
+    let mut wait_for_connection_tasks = Vec::new();
+
+    for store in stores {
+        for agent_id in agent_ids.clone() {
+            let agent = Agent::from(agent_id.clone());
+            let server = agent.server(<dyn Fs>::global(cx), ThreadStore::global(cx));
+            let entry = store.update(cx, |store, cx| store.request_connection(agent, server, cx));
+            wait_for_connection_tasks
+                .push(entry.read(cx).wait_for_connection().map(|s| (agent_id, s)));
+        }
+    }
+
+    let mut session_list_tasks = Vec::new();
+    cx.spawn(async move |cx| {
+        let results = futures::future::join_all(wait_for_connection_tasks).await;
+        for (agent, result) in results {
+            let Some(state) = result.log_err() else {
+                continue;
+            };
+            let Some(list) = cx.update(|cx| state.connection.session_list(cx)) else {
+                continue;
+            };
+            let task = cx.update(|cx| {
+                list.list_sessions(AgentSessionListRequest::default(), cx)
+                    .map(|r| (agent, r))
+            });
+            session_list_tasks.push(task);
+        }
+
+        let mut to_insert = Vec::new();
+        let mut existing_sessions = existing_sessions;
+        let results = futures::future::join_all(session_list_tasks).await;
+        for (agent_id, result) in results {
+            let Some(response) = result.log_err() else {
+                continue;
+            };
+            for session in response.sessions {
+                if !existing_sessions.insert(session.session_id.clone()) {
+                    continue;
+                }
+                let Some(folder_paths) = session.work_dirs else {
+                    continue;
+                };
+                to_insert.push(ThreadMetadata {
+                    session_id: session.session_id,
+                    agent_id: agent_id.clone(),
+                    title: session
+                        .title
+                        .unwrap_or_else(|| crate::DEFAULT_THREAD_TITLE.into()),
+                    updated_at: session.updated_at.unwrap_or_else(|| Utc::now()),
+                    created_at: session.created_at,
+                    folder_paths,
+                    archived: true,
+                });
+            }
+        }
+
+        Ok(to_insert)
+    })
 }

@@ -2985,6 +2985,7 @@ impl Sidebar {
                 agent_server_store.clone(),
                 agent_registry_store.downgrade(),
                 active_workspace.downgrade(),
+                self.multi_workspace.clone(),
                 window,
                 cx,
             )
