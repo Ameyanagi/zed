@@ -15993,6 +15993,7 @@ dependencies = [
  "git",
  "gpui",
  "language_model",
+ "log",
  "menu",
  "pretty_assertions",
  "project",

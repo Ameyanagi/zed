@@ -438,7 +438,7 @@ impl GitRepository for FakeGitRepository {
 
     fn create_worktree(
         &self,
-        branch_name: String,
+        branch_name: Option<String>,
         path: PathBuf,
         from_commit: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
@@ -460,18 +460,26 @@ impl GitRepository for FakeGitRepository {
             fs.with_git_state(&dot_git_path, true, {
                 let path = path.clone();
                 move |state| {
-                    if state.branches.contains(&branch_name) {
-                        bail!("a branch named '{}' already exists", branch_name);
-                    }
-                    let ref_name = format!("refs/heads/{branch_name}");
                     let sha = from_commit.unwrap_or_else(|| "fake-sha".to_string());
-                    state.refs.insert(ref_name.clone(), sha.clone());
-                    state.worktrees.push(Worktree {
-                        path,
-                        ref_name: Some(ref_name.into()),
-                        sha: sha.into(),
-                    });
-                    state.branches.insert(branch_name);
+                    if let Some(branch_name) = branch_name {
+                        if state.branches.contains(&branch_name) {
+                            bail!("a branch named '{}' already exists", branch_name);
+                        }
+                        let ref_name = format!("refs/heads/{branch_name}");
+                        state.refs.insert(ref_name.clone(), sha.clone());
+                        state.worktrees.push(Worktree {
+                            path,
+                            ref_name: Some(ref_name.into()),
+                            sha: sha.into(),
+                        });
+                        state.branches.insert(branch_name);
+                    } else {
+                        state.worktrees.push(Worktree {
+                            path,
+                            ref_name: None,
+                            sha: sha.into(),
+                        });
+                    }
                     Ok::<(), anyhow::Error>(())
                 }
             })??;
@@ -1019,6 +1027,24 @@ impl GitRepository for FakeGitRepository {
 
     fn commit_data_reader(&self) -> Result<CommitDataReader> {
         anyhow::bail!("commit_data_reader not supported for FakeGitRepository")
+    }
+
+    fn update_ref(&self, ref_name: String, commit: String) -> BoxFuture<'_, Result<()>> {
+        self.with_state_async(true, move |state| {
+            state.refs.insert(ref_name, commit);
+            Ok(())
+        })
+    }
+
+    fn delete_ref(&self, ref_name: String) -> BoxFuture<'_, Result<()>> {
+        self.with_state_async(true, move |state| {
+            state.refs.remove(&ref_name);
+            Ok(())
+        })
+    }
+
+    fn stage_all_including_untracked(&self) -> BoxFuture<'_, Result<()>> {
+        async { Ok(()) }.boxed()
     }
 
     fn set_trusted(&self, trusted: bool) {
