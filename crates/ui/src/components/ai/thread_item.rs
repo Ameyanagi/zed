@@ -7,7 +7,9 @@ use gpui::{
     Animation, AnimationExt, AnyView, ClickEvent, Hsla, MouseButton, SharedString,
     pulsating_between,
 };
+use itertools::Itertools as _;
 use std::time::Duration;
+use util::path_list::PathList;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AgentThreadStatus {
@@ -37,6 +39,7 @@ pub struct ThreadItem {
     hovered: bool,
     added: Option<usize>,
     removed: Option<usize>,
+    project_paths: Option<PathList>,
     worktree: Option<SharedString>,
     worktree_full_path: Option<SharedString>,
     worktree_highlight_positions: Vec<usize>,
@@ -66,6 +69,7 @@ impl ThreadItem {
             hovered: false,
             added: None,
             removed: None,
+            project_paths: None,
             worktree: None,
             worktree_full_path: None,
             worktree_highlight_positions: Vec::new(),
@@ -143,6 +147,11 @@ impl ThreadItem {
 
     pub fn removed(mut self, removed: usize) -> Self {
         self.removed = Some(removed);
+        self
+    }
+
+    pub fn project_paths(mut self, paths: PathList) -> Self {
+        self.project_paths = Some(paths);
         self
     }
 
@@ -319,6 +328,21 @@ impl RenderOnce for ThreadItem {
         let added_count = self.added.unwrap_or(0);
         let removed_count = self.removed.unwrap_or(0);
 
+        let project_paths = self.project_paths.as_ref().and_then(|paths| {
+            let paths_str = paths
+                .paths()
+                .iter()
+                .filter_map(|p| p.file_name())
+                .filter_map(|name| name.to_str())
+                .join(", ");
+            if paths_str.is_empty() {
+                None
+            } else {
+                Some(paths_str)
+            }
+        });
+
+        let has_project_paths = project_paths.is_some();
         let has_worktree = self.worktree.is_some();
         let has_timestamp = !self.timestamp.is_empty();
         let timestamp = self.timestamp;
@@ -397,6 +421,17 @@ impl RenderOnce for ThreadItem {
                         .min_w_0()
                         .gap_1p5()
                         .child(icon_container()) // Icon Spacing
+                        .when_some(project_paths, |this, paths| {
+                            this.child(
+                                Label::new(paths)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted)
+                                    .into_any_element(),
+                            )
+                        })
+                        .when(has_project_paths && has_worktree, |this| {
+                            this.child(dot_separator())
+                        })
                         .when_some(worktree_label, |this, label| {
                             this.child(
                                 h_flex()
@@ -418,9 +453,11 @@ impl RenderOnce for ThreadItem {
                                     }),
                             )
                         })
-                        .when(has_worktree && (has_diff_stats || has_timestamp), |this| {
-                            this.child(dot_separator())
-                        })
+                        .when(
+                            (has_project_paths || has_worktree)
+                                && (has_diff_stats || has_timestamp),
+                            |this| this.child(dot_separator()),
+                        )
                         .when(has_diff_stats, |this| {
                             this.child(
                                 DiffStat::new(diff_stat_id, added_count, removed_count)

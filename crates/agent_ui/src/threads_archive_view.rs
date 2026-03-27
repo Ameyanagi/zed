@@ -8,7 +8,7 @@ use gpui::{
 };
 use itertools::Itertools as _;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
-use project::{AgentId, AgentServerStore};
+use project::AgentServerStore;
 use settings::Settings as _;
 use theme::ActiveTheme;
 use ui::ThreadItem;
@@ -345,28 +345,6 @@ impl ThreadsArchiveView {
         self.unarchive_thread(thread.clone(), window, cx);
     }
 
-    fn agent_icon(&self, agent: Option<&AgentId>, cx: &App) -> Icon {
-        let icon = match agent {
-            Some(agent) if agent.as_ref() == agent::ZED_AGENT_ID.as_ref() => {
-                Icon::new(IconName::ZedAgent)
-            }
-            Some(agent) => {
-                let icon = self
-                    .agent_server_store
-                    .upgrade()
-                    .and_then(|store| store.read(cx).agent_icon(agent));
-
-                if let Some(icon) = icon {
-                    Icon::from_external_svg(icon)
-                } else {
-                    Icon::new(IconName::Sparkle)
-                }
-            }
-            None => Icon::new(IconName::ZedAgent),
-        };
-        icon.color(Color::Muted).size(IconSize::Small)
-    }
-
     fn render_list_entry(
         &mut self,
         ix: usize,
@@ -398,21 +376,6 @@ impl ThreadsArchiveView {
                 let is_focused = self.selection == Some(ix);
                 let is_hovered = self.hovered_index == Some(ix);
 
-                let project_names = {
-                    let paths_str = thread
-                        .folder_paths
-                        .paths()
-                        .iter()
-                        .filter_map(|p| p.file_name())
-                        .filter_map(|name| name.to_str())
-                        .join(", ");
-                    if paths_str.is_empty() {
-                        None
-                    } else {
-                        Some(paths_str)
-                    }
-                };
-
                 let timestamp =
                     format_history_entry_timestamp(thread.created_at.unwrap_or(thread.updated_at));
 
@@ -435,7 +398,7 @@ impl ThreadsArchiveView {
                     .timestamp(timestamp)
                     .highlight_positions(highlight_positions.clone())
                     // Fixme: Use a separate slot for project names
-                    .when_some(project_names, |this, names| this.worktree_full_path(names))
+                    .project_paths(thread.folder_paths.clone())
                     .focused(is_focused)
                     .hovered(is_hovered)
                     .on_hover(cx.listener(move |this, is_hovered, _window, cx| {
