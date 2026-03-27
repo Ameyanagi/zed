@@ -83,6 +83,8 @@ pub(crate) struct DockerComposeService {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) privileged: Option<bool>,
     pub(crate) volumes: Vec<MountDefinition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) env_file: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq, Default)]
