@@ -209,6 +209,11 @@ impl ThreadMetadataStore {
         self.threads.is_empty()
     }
 
+    /// Returns all thread IDs.
+    pub fn entry_ids(&self) -> impl Iterator<Item = acp::SessionId> + '_ {
+        self.threads.keys().cloned()
+    }
+
     /// Returns all threads.
     pub fn entries(&self) -> impl Iterator<Item = ThreadMetadata> + '_ {
         self.threads.values().cloned()
@@ -663,8 +668,8 @@ mod tests {
             let store = store.read(cx);
 
             let entry_ids = store
-                .entries()
-                .map(|t| t.session_id.0.to_string())
+                .entry_ids()
+                .map(|session_id| session_id.0.to_string())
                 .collect::<Vec<_>>();
             assert_eq!(entry_ids.len(), 2);
             assert!(entry_ids.contains(&"session-1".to_string()));
@@ -760,8 +765,8 @@ mod tests {
             let store = store.read(cx);
 
             let entry_ids = store
-                .entries()
-                .map(|t| t.session_id.0.to_string())
+                .entry_ids()
+                .map(|session_id| session_id.0.to_string())
                 .collect::<Vec<_>>();
             assert_eq!(entry_ids.len(), 2);
             assert!(entry_ids.contains(&"session-1".to_string()));
@@ -796,8 +801,8 @@ mod tests {
             let store = store.read(cx);
 
             let entry_ids = store
-                .entries()
-                .map(|t| t.session_id.0.to_string())
+                .entry_ids()
+                .map(|session_id| session_id.0.to_string())
                 .collect::<Vec<_>>();
             assert_eq!(entry_ids, vec!["session-1"]);
 
