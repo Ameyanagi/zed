@@ -662,7 +662,15 @@ fn prompt_and_open_paths(app_state: Arc<AppState>, options: PathPromptOptions, c
             })
             .ok();
     } else {
-        let task = Workspace::new_local(Vec::new(), app_state.clone(), None, None, None, true, cx);
+        let task = Workspace::new_local(
+            Vec::new(),
+            app_state.clone(),
+            None,
+            None,
+            None,
+            MultiWorkspaceOperation::Replace,
+            cx,
+        );
         cx.spawn(async move |cx| {
             let OpenResult { window, .. } = task.await?;
             window.update(cx, |multi_workspace, window, cx| {
@@ -701,7 +709,7 @@ pub fn prompt_for_open_path_and_open(
             if let Some(handle) = multi_workspace_handle {
                 if let Some(task) = handle
                     .update(cx, |multi_workspace, window, cx| {
-                        multi_workspace.open_project(paths, window, cx)
+                        multi_workspace.open_project(paths, true, window, cx)
                     })
                     .log_err()
                 {
@@ -712,7 +720,13 @@ pub fn prompt_for_open_path_and_open(
         }
         if let Some(task) = this
             .update_in(cx, |this, window, cx| {
-                this.open_workspace_for_paths(false, paths, window, cx)
+                this.open_workspace_for_paths(
+                    false,
+                    MultiWorkspaceOperation::Replace,
+                    paths,
+                    window,
+                    cx,
+                )
             })
             .log_err()
         {
@@ -1364,6 +1378,18 @@ struct FollowerView {
     location: Option<proto::PanelId>,
 }
 
+/// Controls how a newly created workspace is added to the multi-workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MultiWorkspaceOperation {
+    /// Add the workspace to the list without activating it (used during deserialization).
+    Add,
+    /// Add the workspace and make it the active one.
+    #[default]
+    Activate,
+    /// Replace the currently active workspace with the new one.
+    Replace,
+}
+
 impl Workspace {
     pub fn new(
         workspace_id: Option<WorkspaceId>,
@@ -1763,7 +1789,7 @@ impl Workspace {
         requesting_window: Option<WindowHandle<MultiWorkspace>>,
         env: Option<HashMap<String, String>>,
         init: Option<Box<dyn FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>) + Send>>,
-        activate: bool,
+        addition: MultiWorkspaceOperation,
         cx: &mut App,
     ) -> Task<anyhow::Result<OpenResult>> {
         let project_handle = Project::local(
@@ -1887,10 +1913,16 @@ impl Workspace {
 
                             workspace
                         });
-                        if activate {
-                            multi_workspace.activate(workspace.clone(), cx);
-                        } else {
-                            multi_workspace.add_workspace(workspace.clone(), cx);
+                        match addition {
+                            MultiWorkspaceOperation::Replace => {
+                                multi_workspace.replace(workspace.clone(), &*window, cx);
+                            }
+                            MultiWorkspaceOperation::Activate => {
+                                multi_workspace.activate(workspace.clone(), window, cx);
+                            }
+                            MultiWorkspaceOperation::Add => {
+                                multi_workspace.add(workspace.clone(), &*window, cx);
+                            }
                         }
                         workspace
                     })?;
@@ -2872,7 +2904,7 @@ impl Workspace {
                 None,
                 env,
                 None,
-                true,
+                MultiWorkspaceOperation::Activate,
                 cx,
             );
             cx.spawn_in(window, async move |_vh, cx| {
@@ -2913,7 +2945,7 @@ impl Workspace {
                 None,
                 env,
                 None,
-                true,
+                MultiWorkspaceOperation::Activate,
                 cx,
             );
             cx.spawn_in(window, async move |_vh, cx| {
@@ -3296,6 +3328,7 @@ impl Workspace {
     pub fn open_workspace_for_paths(
         &mut self,
         replace_current_window: bool,
+        addition: MultiWorkspaceOperation,
         paths: Vec<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -3322,6 +3355,7 @@ impl Workspace {
                         app_state,
                         OpenOptions {
                             replace_window: window_to_replace,
+                            multi_workspace_operation: addition,
                             ..Default::default()
                         },
                         cx,
@@ -8500,7 +8534,7 @@ pub async fn restore_multiworkspace(
                     None,
                     None,
                     None,
-                    true,
+                    MultiWorkspaceOperation::Activate,
                     cx,
                 )
             })
@@ -8530,7 +8564,7 @@ pub async fn restore_multiworkspace(
                     Some(window_handle),
                     None,
                     None,
-                    false,
+                    MultiWorkspaceOperation::Add,
                     cx,
                 )
             })
@@ -8550,18 +8584,17 @@ pub async fn restore_multiworkspace(
                     .workspaces()
                     .iter()
                     .position(|ws| ws.read(cx).database_id() == Some(target_id));
-                if let Some(index) = target_index {
-                    multi_workspace.activate_index(index, window, cx);
-                } else if !multi_workspace.workspaces().is_empty() {
-                    multi_workspace.activate_index(0, window, cx);
+                let index = target_index.unwrap_or(0);
+                if let Some(workspace) = multi_workspace.workspaces().get(index).cloned() {
+                    multi_workspace.activate(workspace, window, cx);
                 }
             })
             .ok();
     } else {
         window_handle
             .update(cx, |multi_workspace, window, cx| {
-                if !multi_workspace.workspaces().is_empty() {
-                    multi_workspace.activate_index(0, window, cx);
+                if let Some(workspace) = multi_workspace.workspaces().first().cloned() {
+                    multi_workspace.activate(workspace, window, cx);
                 }
             })
             .ok();
@@ -8812,7 +8845,7 @@ pub fn join_channel(
                         requesting_window,
                         None,
                         None,
-                        true,
+                        MultiWorkspaceOperation::Activate,
                         cx,
                     )
                 })
@@ -8885,8 +8918,18 @@ pub async fn get_any_active_multi_workspace(
     // find an existing workspace to focus and show call controls
     let active_window = activate_any_workspace_window(&mut cx);
     if active_window.is_none() {
-        cx.update(|cx| Workspace::new_local(vec![], app_state.clone(), None, None, None, true, cx))
-            .await?;
+        cx.update(|cx| {
+            Workspace::new_local(
+                vec![],
+                app_state.clone(),
+                None,
+                None,
+                None,
+                MultiWorkspaceOperation::Activate,
+                cx,
+            )
+        })
+        .await?;
     }
     activate_any_workspace_window(&mut cx).context("could not open zed")
 }
@@ -9057,6 +9100,7 @@ pub struct OpenOptions {
     pub open_new_workspace: Option<bool>,
     pub wait: bool,
     pub replace_window: Option<WindowHandle<MultiWorkspace>>,
+    pub multi_workspace_operation: MultiWorkspaceOperation,
     pub env: Option<HashMap<String, String>>,
 }
 
@@ -9111,7 +9155,7 @@ pub fn open_workspace_by_id(
                     workspace.centered_layout = centered_layout;
                     workspace
                 });
-                multi_workspace.add_workspace(workspace.clone(), cx);
+                multi_workspace.add(workspace.clone(), &*window, cx);
                 workspace
             })?;
             (window, workspace)
@@ -9241,7 +9285,7 @@ pub fn open_paths(
             let open_task = existing
                 .update(cx, |multi_workspace, window, cx| {
                     window.activate_window();
-                    multi_workspace.activate(target_workspace.clone(), cx);
+                    multi_workspace.activate(target_workspace.clone(), window, cx);
                     target_workspace.update(cx, |workspace, cx| {
                         workspace.open_paths(
                             abs_paths,
@@ -9278,7 +9322,7 @@ pub fn open_paths(
                         open_options.replace_window,
                         open_options.env,
                         None,
-                        true,
+                        open_options.multi_workspace_operation,
                         cx,
                     )
                 })
@@ -9336,13 +9380,14 @@ pub fn open_new(
     cx: &mut App,
     init: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static + Send,
 ) -> Task<anyhow::Result<()>> {
+    let addition = open_options.multi_workspace_operation;
     let task = Workspace::new_local(
         Vec::new(),
         app_state,
         open_options.replace_window,
         open_options.env,
         Some(Box::new(init)),
-        true,
+        addition,
         cx,
     );
     cx.spawn(async move |cx| {
@@ -9553,7 +9598,7 @@ async fn open_remote_project_inner(
             workspace
         });
 
-        multi_workspace.activate(new_workspace.clone(), cx);
+        multi_workspace.activate(new_workspace.clone(), window, cx);
         new_workspace
     })?;
 
@@ -9640,8 +9685,8 @@ pub fn join_in_room_project(
             existing_window_and_workspace
         {
             existing_window
-                .update(cx, |multi_workspace, _, cx| {
-                    multi_workspace.activate(target_workspace, cx);
+                .update(cx, |multi_workspace, window, cx| {
+                    multi_workspace.activate(target_workspace, window, cx);
                 })
                 .ok();
             existing_window
@@ -10577,7 +10622,8 @@ mod tests {
         // Activate workspace A
         multi_workspace_handle
             .update(cx, |mw, window, cx| {
-                mw.activate_index(0, window, cx);
+                let workspace = mw.workspaces()[0].clone();
+                mw.activate(workspace, window, cx);
             })
             .unwrap();
 
@@ -14295,7 +14341,8 @@ mod tests {
         // Switch to workspace A
         multi_workspace_handle
             .update(cx, |mw, window, cx| {
-                mw.activate_index(0, window, cx);
+                let workspace = mw.workspaces()[0].clone();
+                mw.activate(workspace, window, cx);
             })
             .unwrap();
 
@@ -14340,7 +14387,8 @@ mod tests {
         // Switch to workspace B
         multi_workspace_handle
             .update(cx, |mw, window, cx| {
-                mw.activate_index(1, window, cx);
+                let workspace = mw.workspaces()[1].clone();
+                mw.activate(workspace, window, cx);
             })
             .unwrap();
         cx.run_until_parked();
@@ -14348,7 +14396,8 @@ mod tests {
         // Switch back to workspace A
         multi_workspace_handle
             .update(cx, |mw, window, cx| {
-                mw.activate_index(0, window, cx);
+                let workspace = mw.workspaces()[0].clone();
+                mw.activate(workspace, window, cx);
             })
             .unwrap();
         cx.run_until_parked();

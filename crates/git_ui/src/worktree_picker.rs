@@ -20,7 +20,10 @@ use settings::Settings;
 use std::{path::PathBuf, sync::Arc};
 use ui::{HighlightedLabel, KeyBinding, ListItem, ListItemSpacing, Tooltip, prelude::*};
 use util::ResultExt;
-use workspace::{ModalView, MultiWorkspace, Workspace, notifications::DetachAndPromptErr};
+use workspace::{
+    ModalView, MultiWorkspace, MultiWorkspaceOperation, Workspace,
+    notifications::DetachAndPromptErr,
+};
 
 use crate::git_panel::show_error_toast;
 
@@ -352,6 +355,7 @@ impl WorktreeListDelegate {
                     .update_in(cx, |workspace, window, cx| {
                         workspace.open_workspace_for_paths(
                             replace_current_window,
+                            MultiWorkspaceOperation::Activate,
                             vec![new_worktree_path],
                             window,
                             cx,
@@ -407,7 +411,13 @@ impl WorktreeListDelegate {
 
         if is_local {
             let open_task = workspace.update(cx, |workspace, cx| {
-                workspace.open_workspace_for_paths(replace_current_window, vec![path], window, cx)
+                workspace.open_workspace_for_paths(
+                    replace_current_window,
+                    MultiWorkspaceOperation::Activate,
+                    vec![path],
+                    window,
+                    cx,
+                )
             });
             cx.spawn(async move |_, _| {
                 open_task?.await?;

@@ -1400,8 +1400,11 @@ impl Sidebar {
                                     this.focused_thread = None;
                                     if let Some(multi_workspace) = this.multi_workspace.upgrade() {
                                         multi_workspace.update(cx, |multi_workspace, cx| {
-                                            multi_workspace
-                                                .activate(workspace_for_open.clone(), cx);
+                                            multi_workspace.activate(
+                                                workspace_for_open.clone(),
+                                                window,
+                                                cx,
+                                            );
                                         });
                                     }
                                     if AgentPanel::is_visible(&workspace_for_open, cx) {
@@ -1504,13 +1507,7 @@ impl Sidebar {
                                 if let Some(mw) = multi_workspace_for_worktree.upgrade() {
                                     let ws = workspace_for_remove_worktree.clone();
                                     mw.update(cx, |multi_workspace, cx| {
-                                        if let Some(index) = multi_workspace
-                                            .workspaces()
-                                            .iter()
-                                            .position(|w| *w == ws)
-                                        {
-                                            multi_workspace.remove_workspace(index, window, cx);
-                                        }
+                                        multi_workspace.remove(&ws, window, cx);
                                     });
                                 }
                             } else {
@@ -1540,7 +1537,7 @@ impl Sidebar {
                         move |window, cx| {
                             if let Some(mw) = multi_workspace_for_add.upgrade() {
                                 mw.update(cx, |mw, cx| {
-                                    mw.activate(workspace_for_add.clone(), cx);
+                                    mw.activate(workspace_for_add.clone(), window, cx);
                                 });
                             }
                             workspace_for_add.update(cx, |workspace, cx| {
@@ -1563,14 +1560,11 @@ impl Sidebar {
                             move |window, cx| {
                                 if let Some(mw) = multi_workspace_for_move.upgrade() {
                                     mw.update(cx, |multi_workspace, cx| {
-                                        if let Some(index) = multi_workspace
-                                            .workspaces()
-                                            .iter()
-                                            .position(|w| *w == workspace_for_move)
-                                        {
-                                            multi_workspace
-                                                .move_workspace_to_new_window(index, window, cx);
-                                        }
+                                        multi_workspace.move_workspace_to_new_window(
+                                            &workspace_for_move,
+                                            window,
+                                            cx,
+                                        );
                                     });
                                 }
                             },
@@ -1586,11 +1580,7 @@ impl Sidebar {
                             if let Some(mw) = multi_workspace_for_remove.upgrade() {
                                 let ws = workspace_for_remove.clone();
                                 mw.update(cx, |multi_workspace, cx| {
-                                    if let Some(index) =
-                                        multi_workspace.workspaces().iter().position(|w| *w == ws)
-                                    {
-                                        multi_workspace.remove_workspace(index, window, cx);
-                                    }
+                                    multi_workspace.remove(&ws, window, cx);
                                 });
                             }
                         })
@@ -1767,14 +1757,7 @@ impl Sidebar {
         };
 
         multi_workspace.update(cx, |multi_workspace, cx| {
-            let Some(index) = multi_workspace
-                .workspaces()
-                .iter()
-                .position(|w| w == workspace)
-            else {
-                return;
-            };
-            multi_workspace.remove_workspace(index, window, cx);
+            multi_workspace.remove(workspace, window, cx);
         });
     }
 
@@ -2068,7 +2051,7 @@ impl Sidebar {
         self.focused_thread = Some(session_info.session_id.clone());
 
         multi_workspace.update(cx, |multi_workspace, cx| {
-            multi_workspace.activate(workspace.clone(), cx);
+            multi_workspace.activate(workspace.clone(), window, cx);
         });
 
         Self::load_agent_thread_in_workspace(workspace, agent, session_info, window, cx);
@@ -2089,7 +2072,7 @@ impl Sidebar {
         let activated = target_window
             .update(cx, |multi_workspace, window, cx| {
                 window.activate_window();
-                multi_workspace.activate(workspace.clone(), cx);
+                multi_workspace.activate(workspace.clone(), window, cx);
                 Self::load_agent_thread_in_workspace(&workspace, agent, session_info, window, cx);
             })
             .log_err()
@@ -2152,7 +2135,8 @@ impl Sidebar {
         let paths: Vec<std::path::PathBuf> =
             path_list.paths().iter().map(|p| p.to_path_buf()).collect();
 
-        let open_task = multi_workspace.update(cx, |mw, cx| mw.open_project(paths, window, cx));
+        let open_task =
+            multi_workspace.update(cx, |mw, cx| mw.open_project(paths, false, window, cx));
 
         cx.spawn_in(window, async move |this, cx| {
             let workspace = open_task.await?;
@@ -2793,7 +2777,7 @@ impl Sidebar {
         self.focused_thread = None;
 
         multi_workspace.update(cx, |multi_workspace, cx| {
-            multi_workspace.activate(workspace.clone(), cx);
+            multi_workspace.activate(workspace.clone(), window, cx);
         });
 
         workspace.update(cx, |workspace, cx| {
@@ -3600,7 +3584,8 @@ mod tests {
 
         // Remove the second workspace
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.remove_workspace(1, window, cx);
+            let ws = mw.workspaces()[1].clone();
+            mw.remove(&ws, window, cx);
         });
         cx.run_until_parked();
 
@@ -4962,7 +4947,8 @@ mod tests {
 
         // Switch to workspace 1 so we can verify the confirm switches back.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(1, window, cx);
+            let workspace = mw.workspaces()[1].clone();
+            mw.activate(workspace, window, cx);
         });
         cx.run_until_parked();
         assert_eq!(
@@ -5226,7 +5212,8 @@ mod tests {
         });
 
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
         cx.run_until_parked();
 
@@ -5280,8 +5267,8 @@ mod tests {
         // Switching workspaces via the multi_workspace (simulates clicking
         // a workspace header) should clear focused_thread.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            if let Some(index) = mw.workspaces().iter().position(|w| w == &workspace_b) {
-                mw.activate_index(index, window, cx);
+            if let Some(workspace) = mw.workspaces().iter().find(|w| *w == &workspace_b).cloned() {
+                mw.activate(workspace, window, cx);
             }
         });
         cx.run_until_parked();
@@ -5544,7 +5531,8 @@ mod tests {
 
         // Switch to the worktree workspace.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(1, window, cx);
+            let workspace = mw.workspaces()[1].clone();
+            mw.activate(workspace, window, cx);
         });
 
         let sidebar = setup_sidebar(&multi_workspace, cx);
@@ -5916,7 +5904,8 @@ mod tests {
 
         // Switch back to the main workspace before setting up the sidebar.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
 
         let sidebar = setup_sidebar(&multi_workspace, cx);
@@ -6024,7 +6013,8 @@ mod tests {
         let worktree_panel = add_agent_panel(&worktree_workspace, &worktree_project, cx);
 
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
 
         let sidebar = setup_sidebar(&multi_workspace, cx);
@@ -6387,7 +6377,8 @@ mod tests {
 
         // Activate the main workspace before setting up the sidebar.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
 
         let sidebar = setup_sidebar(&multi_workspace, cx);
@@ -6471,7 +6462,8 @@ mod tests {
 
         // Ensure workspace A is active.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
         cx.run_until_parked();
         assert_eq!(
@@ -6533,7 +6525,8 @@ mod tests {
 
         // Start with workspace A active.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
         cx.run_until_parked();
         assert_eq!(
@@ -6594,7 +6587,8 @@ mod tests {
 
         // Activate workspace B (index 1) to make it the active one.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(1, window, cx);
+            let workspace = mw.workspaces()[1].clone();
+            mw.activate(workspace, window, cx);
         });
         cx.run_until_parked();
         assert_eq!(
@@ -6983,7 +6977,8 @@ mod tests {
 
         // Activate main workspace so the sidebar tracks the main panel.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_index(0, window, cx);
+            let workspace = mw.workspaces()[0].clone();
+            mw.activate(workspace, window, cx);
         });
 
         let sidebar = setup_sidebar(&multi_workspace, cx);

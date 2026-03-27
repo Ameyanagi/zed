@@ -272,7 +272,7 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
                     cx.defer(move |cx| {
                         if let Some(task) = handle
                             .update(cx, |multi_workspace, window, cx| {
-                                multi_workspace.open_project(paths, window, cx)
+                                multi_workspace.open_project(paths, false, window, cx)
                             })
                             .log_err()
                         {

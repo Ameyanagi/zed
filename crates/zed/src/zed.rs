@@ -1377,7 +1377,7 @@ fn quit(_: &Quit, cx: &mut App) {
             for workspace in workspaces {
                 if let Some(should_close) = window
                     .update(cx, |multi_workspace, window, cx| {
-                        multi_workspace.activate(workspace.clone(), cx);
+                        multi_workspace.activate(workspace.clone(), window, cx);
                         window.activate_window();
                         workspace.update(cx, |workspace, cx| {
                             workspace.prepare_to_close(CloseIntent::Quit, window, cx)
@@ -5375,11 +5375,11 @@ mod tests {
             .unwrap();
 
         window
-            .update(cx, |multi_workspace, _, cx| {
-                multi_workspace.activate(workspace2.clone(), cx);
-                multi_workspace.activate(workspace3.clone(), cx);
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.activate(workspace2.clone(), window, cx);
+                multi_workspace.activate(workspace3.clone(), window, cx);
                 // Switch back to workspace1 for test setup
-                multi_workspace.activate(workspace1, cx);
+                multi_workspace.activate(workspace1, window, cx);
                 assert_eq!(multi_workspace.active_workspace_index(), 0);
             })
             .unwrap();
@@ -5561,9 +5561,9 @@ mod tests {
             .unwrap();
 
         window1
-            .update(cx, |multi_workspace, _, cx| {
-                multi_workspace.activate(workspace1_2.clone(), cx);
-                multi_workspace.activate(workspace1_1.clone(), cx);
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.activate(workspace1_2.clone(), window, cx);
+                multi_workspace.activate(workspace1_1.clone(), window, cx);
             })
             .unwrap();
 
@@ -5794,7 +5794,7 @@ mod tests {
     async fn test_multi_workspace_session_restore(cx: &mut TestAppContext) {
         use collections::HashMap;
         use session::Session;
-        use workspace::{Workspace, WorkspaceId};
+        use workspace::{MultiWorkspaceOperation, Workspace, WorkspaceId};
 
         let app_state = init_test(cx);
 
@@ -5829,7 +5829,7 @@ mod tests {
                     None,
                     None,
                     None,
-                    true,
+                    MultiWorkspaceOperation::Activate,
                     cx,
                 )
             })
@@ -5838,7 +5838,7 @@ mod tests {
 
         window_a
             .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.open_project(vec![dir2.into()], window, cx)
+                multi_workspace.open_project(vec![dir2.into()], true, window, cx)
             })
             .unwrap()
             .await
@@ -5855,7 +5855,7 @@ mod tests {
                     None,
                     None,
                     None,
-                    true,
+                    MultiWorkspaceOperation::Activate,
                     cx,
                 )
             })
@@ -5868,7 +5868,8 @@ mod tests {
         // still be active rather than whichever workspace happened to restore last.
         window_a
             .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.activate_index(0, window, cx);
+                let workspace = multi_workspace.workspaces()[0].clone();
+                multi_workspace.activate(workspace, window, cx);
             })
             .unwrap();
 

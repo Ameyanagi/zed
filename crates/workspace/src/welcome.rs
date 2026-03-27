@@ -1,5 +1,6 @@
 use crate::{
-    NewFile, Open, PathList, SerializedWorkspaceLocation, Workspace, WorkspaceId,
+    MultiWorkspaceOperation, NewFile, Open, PathList, SerializedWorkspaceLocation, Workspace,
+    WorkspaceId,
     item::{Item, ItemEvent},
     persistence::WorkspaceDb,
 };
@@ -326,7 +327,13 @@ impl WelcomePage {
                     self.workspace
                         .update(cx, |workspace, cx| {
                             workspace
-                                .open_workspace_for_paths(true, paths, window, cx)
+                                .open_workspace_for_paths(
+                                    true,
+                                    MultiWorkspaceOperation::Replace,
+                                    paths,
+                                    window,
+                                    cx,
+                                )
                                 .detach_and_log_err(cx);
                         })
                         .log_err();

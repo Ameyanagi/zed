@@ -46,8 +46,8 @@ use ui::{
 };
 use util::{ResultExt, paths::PathExt};
 use workspace::{
-    HistoryManager, ModalView, MultiWorkspace, OpenOptions, OpenVisible, PathList,
-    SerializedWorkspaceLocation, Workspace, WorkspaceDb, WorkspaceId,
+    HistoryManager, ModalView, MultiWorkspace, MultiWorkspaceOperation, OpenOptions, OpenVisible,
+    PathList, SerializedWorkspaceLocation, Workspace, WorkspaceDb, WorkspaceId,
     notifications::DetachAndPromptErr, with_active_or_new_workspace,
 };
 use zed_actions::{OpenDevContainer, OpenRecent, OpenRemote};
@@ -1031,14 +1031,14 @@ impl PickerDelegate for RecentProjectsDelegate {
                 if let Some(handle) = window.window_handle().downcast::<MultiWorkspace>() {
                     cx.defer(move |cx| {
                         handle
-                            .update(cx, |multi_workspace, _window, cx| {
+                            .update(cx, |multi_workspace, window, cx| {
                                 let workspace = multi_workspace
                                     .workspaces()
                                     .iter()
                                     .find(|ws| ws.read(cx).database_id() == Some(workspace_id))
                                     .cloned();
                                 if let Some(workspace) = workspace {
-                                    multi_workspace.activate(workspace, cx);
+                                    multi_workspace.activate(workspace, window, cx);
                                 }
                             })
                             .log_err();
@@ -1079,7 +1079,8 @@ impl PickerDelegate for RecentProjectsDelegate {
                                     cx.defer(move |cx| {
                                         if let Some(task) = handle
                                             .update(cx, |multi_workspace, window, cx| {
-                                                multi_workspace.open_project(paths, window, cx)
+                                                multi_workspace
+                                                    .open_project(paths, true, window, cx)
                                             })
                                             .log_err()
                                         {
@@ -1090,7 +1091,13 @@ impl PickerDelegate for RecentProjectsDelegate {
                                 return;
                             } else {
                                 workspace
-                                    .open_workspace_for_paths(false, paths, window, cx)
+                                    .open_workspace_for_paths(
+                                        false,
+                                        MultiWorkspaceOperation::Replace,
+                                        paths,
+                                        window,
+                                        cx,
+                                    )
                                     .detach_and_prompt_err(
                                         "Failed to open project",
                                         window,
@@ -1804,12 +1811,13 @@ impl RecentProjectsDelegate {
             cx.defer(move |cx| {
                 handle
                     .update(cx, |multi_workspace, window, cx| {
-                        let index = multi_workspace
+                        let workspace = multi_workspace
                             .workspaces()
                             .iter()
-                            .position(|ws| ws.read(cx).database_id() == Some(workspace_id));
-                        if let Some(index) = index {
-                            multi_workspace.remove_workspace(index, window, cx);
+                            .find(|ws| ws.read(cx).database_id() == Some(workspace_id))
+                            .cloned();
+                        if let Some(workspace) = workspace {
+                            multi_workspace.remove(&workspace, window, cx);
                         }
                     })
                     .log_err();

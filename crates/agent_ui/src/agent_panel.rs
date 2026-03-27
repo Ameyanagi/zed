@@ -83,8 +83,9 @@ use ui::{
 };
 use util::{ResultExt as _, debug_panic};
 use workspace::{
-    CollaboratorId, DraggedSelection, DraggedTab, OpenResult, PathList, SerializedPathList,
-    ToggleWorkspaceSidebar, ToggleZoom, ToolbarItemView, Workspace, WorkspaceId,
+    CollaboratorId, DraggedSelection, DraggedTab, MultiWorkspaceOperation, OpenResult, PathList,
+    SerializedPathList, ToggleWorkspaceSidebar, ToggleZoom, ToolbarItemView, Workspace,
+    WorkspaceId,
     dock::{DockPosition, Panel, PanelEvent},
 };
 use zed_actions::{
@@ -2933,7 +2934,15 @@ impl AgentPanel {
             ..
         } = cx
             .update(|_window, cx| {
-                Workspace::new_local(all_paths, app_state, window_handle, None, None, false, cx)
+                Workspace::new_local(
+                    all_paths,
+                    app_state,
+                    window_handle,
+                    None,
+                    None,
+                    MultiWorkspaceOperation::Add,
+                    cx,
+                )
             })?
             .await?;
 
@@ -3056,8 +3065,8 @@ impl AgentPanel {
             });
         })?;
 
-        new_window_handle.update(cx, |multi_workspace, _window, cx| {
-            multi_workspace.activate(new_workspace.clone(), cx);
+        new_window_handle.update(cx, |multi_workspace, window, cx| {
+            multi_workspace.activate(new_workspace.clone(), window, cx);
         })?;
 
         this.update_in(cx, |this, window, cx| {
