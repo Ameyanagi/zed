@@ -11,9 +11,9 @@ use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
 use project::{AgentId, AgentServerStore};
 use settings::Settings as _;
 use theme::ActiveTheme;
+use ui::ThreadItem;
 use ui::{
-    Divider, HighlightedLabel, KeyBinding, Tooltip, WithScrollbar, prelude::*,
-    utils::platform_title_bar_height,
+    Divider, KeyBinding, Tooltip, WithScrollbar, prelude::*, utils::platform_title_bar_height,
 };
 use zed_actions::agents_sidebar::FocusSidebarFilter;
 use zed_actions::editor::{MoveDown, MoveUp};
@@ -395,7 +395,7 @@ impl ThreadsArchiveView {
                 let id = SharedString::from(format!("archive-entry-{}", ix));
 
                 let is_focused = self.selection == Some(ix);
-                let hovered = self.hovered_index == Some(ix);
+                let is_hovered = self.hovered_index == Some(ix);
 
                 let project_names = {
                     let paths_str = thread
@@ -412,37 +412,31 @@ impl ThreadsArchiveView {
                     }
                 };
 
-                let focus_handle = self.focus_handle.clone();
-
                 let timestamp =
                     format_history_entry_timestamp(thread.created_at.unwrap_or(thread.updated_at));
 
-                let highlight_positions = highlight_positions.clone();
-                let title_label = if highlight_positions.is_empty() {
-                    Label::new(thread.title.clone())
-                        .truncate()
-                        .flex_1()
-                        .into_any_element()
-                } else {
-                    HighlightedLabel::new(thread.title.clone(), highlight_positions)
-                        .truncate()
-                        .flex_1()
-                        .into_any_element()
+                let icon_from_external_svg = thread.agent_id.as_ref().and_then(|id| {
+                    self.agent_server_store
+                        .upgrade()
+                        .and_then(|store| store.read(cx).agent_icon(id))
+                });
+                let icon = match &thread.agent_id {
+                    None => IconName::ZedAgent,
+                    Some(id) if id.as_ref() == agent::ZED_AGENT_ID.as_ref() => IconName::ZedAgent,
+                    Some(_) => IconName::Sparkle,
                 };
 
-                h_flex()
-                    .id(id)
-                    .min_w_0()
-                    .w_full()
-                    .px(DynamicSpacing::Base06.rems(cx))
-                    .border_1()
-                    .map(|this| {
-                        if is_focused {
-                            this.border_color(cx.theme().colors().border_focused)
-                        } else {
-                            this.border_color(gpui::transparent_black())
-                        }
+                ThreadItem::new(id, thread.title.clone())
+                    .icon(icon)
+                    .when_some(icon_from_external_svg, |this, svg| {
+                        this.custom_icon_from_external_svg(svg)
                     })
+                    .timestamp(timestamp)
+                    .highlight_positions(highlight_positions.clone())
+                    // Fixme: Use a separate slot for project names
+                    .when_some(project_names, |this, names| this.worktree_full_path(names))
+                    .focused(is_focused)
+                    .hovered(is_hovered)
                     .on_hover(cx.listener(move |this, is_hovered, _window, cx| {
                         if *is_hovered {
                             this.hovered_index = Some(ix);
@@ -451,76 +445,30 @@ impl ThreadsArchiveView {
                         }
                         cx.notify();
                     }))
-                    .child(
-                        v_flex()
-                            .min_w_0()
-                            .w_full()
-                            .p_1()
-                            .child(
-                                h_flex()
-                                    .min_w_0()
-                                    .w_full()
-                                    .gap_1()
-                                    .justify_between()
-                                    .child(
-                                        h_flex()
-                                            .gap_1()
-                                            .child(self.agent_icon(thread.agent_id.as_ref(), cx))
-                                            .child(title_label),
+                    .when(is_hovered || is_focused, |this| {
+                        let focus_handle = self.focus_handle.clone();
+                        this.action_slot(
+                            Button::new("unarchive-thread", "Open")
+                                .style(ButtonStyle::Filled)
+                                .label_size(LabelSize::Small)
+                                .when(is_focused, |this| {
+                                    this.key_binding(
+                                        KeyBinding::for_action_in(
+                                            &menu::Confirm,
+                                            &focus_handle,
+                                            cx,
+                                        )
+                                        .map(|kb| kb.size(rems_from_px(12.))),
                                     )
-                                    .when(hovered || is_focused, |this| {
-                                        this.child(
-                                            h_flex().gap_0p5().child(
-                                                Button::new("unarchive-thread", "Open")
-                                                    .style(ButtonStyle::Filled)
-                                                    .label_size(LabelSize::Small)
-                                                    .when(is_focused, |this| {
-                                                        this.key_binding(
-                                                            KeyBinding::for_action_in(
-                                                                &menu::Confirm,
-                                                                &focus_handle,
-                                                                cx,
-                                                            )
-                                                            .map(|kb| kb.size(rems_from_px(12.))),
-                                                        )
-                                                    })
-                                                    .on_click({
-                                                        let thread = thread.clone();
-                                                        cx.listener(move |this, _, window, cx| {
-                                                            this.unarchive_thread(
-                                                                thread.clone(),
-                                                                window,
-                                                                cx,
-                                                            );
-                                                        })
-                                                    }),
-                                            ),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .child(
-                                        Label::new(timestamp)
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted),
-                                    )
-                                    .when_some(project_names, |this, project| {
-                                        this.child(
-                                            Label::new("•")
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted)
-                                                .alpha(0.5),
-                                        )
-                                        .child(
-                                            Label::new(project)
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted),
-                                        )
-                                    }),
-                            ),
-                    )
+                                })
+                                .on_click({
+                                    let thread = thread.clone();
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.unarchive_thread(thread.clone(), window, cx);
+                                    })
+                                }),
+                        )
+                    })
                     .into_any_element()
             }
         }
