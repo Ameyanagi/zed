@@ -421,54 +421,61 @@ impl ThreadsArchiveView {
                         }
                         cx.notify();
                     }))
-                    .when(is_hovered || is_focused, |this| {
-                        let focus_handle = self.focus_handle.clone();
-                        this.action_slot(
-                            Button::new("unarchive-thread", "Open")
-                                .style(ButtonStyle::Filled)
-                                .label_size(LabelSize::Small)
-                                .when(is_focused, |this| {
-                                    this.key_binding(
-                                        KeyBinding::for_action_in(
-                                            &menu::Confirm,
-                                            &focus_handle,
-                                            cx,
-                                        )
-                                        .map(|kb| kb.size(rems_from_px(12.))),
-                                    )
-                                })
-                                .on_click({
-                                    let thread = thread.clone();
-                                    cx.listener(move |this, _, window, cx| {
-                                        this.unarchive_thread(thread.clone(), window, cx);
-                                    })
-                                }),
-                        )
-                    })
-                    .when(supports_delete, |this| {
-                        let agent = thread.agent_id.clone();
-                        let session_id = thread.session_id.clone();
-                        this.action_slot(
-                            IconButton::new("delete-thread", IconName::Trash)
-                                .style(ButtonStyle::Filled)
-                                .icon_size(IconSize::Small)
-                                .icon_color(Color::Muted)
-                                .tooltip({
-                                    move |_window, cx| {
-                                        Tooltip::for_action_in(
-                                            "Delete Thread",
-                                            &RemoveSelectedThread,
-                                            &focus_handle,
-                                            cx,
-                                        )
-                                    }
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.delete_thread(session_id.clone(), agent.clone(), cx);
-                                    cx.stop_propagation();
-                                })),
-                        )
-                    })
+                    .action_slot(
+                        h_flex()
+                            .when(is_hovered || is_focused, |this| {
+                                let focus_handle = self.focus_handle.clone();
+                                this.child(
+                                    Button::new("unarchive-thread", "Open")
+                                        .style(ButtonStyle::Filled)
+                                        .label_size(LabelSize::Small)
+                                        .when(is_focused, |this| {
+                                            this.key_binding(
+                                                KeyBinding::for_action_in(
+                                                    &menu::Confirm,
+                                                    &focus_handle,
+                                                    cx,
+                                                )
+                                                .map(|kb| kb.size(rems_from_px(12.))),
+                                            )
+                                        })
+                                        .on_click({
+                                            let thread = thread.clone();
+                                            cx.listener(move |this, _, window, cx| {
+                                                this.unarchive_thread(thread.clone(), window, cx);
+                                            })
+                                        }),
+                                )
+                            })
+                            .when(supports_delete, |this| {
+                                let agent = thread.agent_id.clone();
+                                let session_id = thread.session_id.clone();
+                                this.child(
+                                    IconButton::new("delete-thread", IconName::Trash)
+                                        .style(ButtonStyle::Filled)
+                                        .icon_size(IconSize::Small)
+                                        .icon_color(Color::Muted)
+                                        .tooltip({
+                                            move |_window, cx| {
+                                                Tooltip::for_action_in(
+                                                    "Delete Thread",
+                                                    &RemoveSelectedThread,
+                                                    &focus_handle,
+                                                    cx,
+                                                )
+                                            }
+                                        })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.delete_thread(
+                                                session_id.clone(),
+                                                agent.clone(),
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        })),
+                                )
+                            }),
+                    )
                     .into_any_element()
             }
         }
