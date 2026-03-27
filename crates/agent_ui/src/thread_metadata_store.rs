@@ -266,6 +266,18 @@ impl ThreadMetadataStore {
         reload_task
     }
 
+    pub fn save_all(&mut self, metadata: Vec<ThreadMetadata>, cx: &mut Context<Self>) {
+        if !cx.has_flag::<AgentV2FeatureFlag>() {
+            return;
+        }
+
+        for metadata in metadata {
+            self.pending_thread_ops_tx
+                .try_send(DbOperation::Insert(metadata))
+                .log_err();
+        }
+    }
+
     pub fn save(&mut self, metadata: ThreadMetadata, cx: &mut Context<Self>) {
         if !cx.has_flag::<AgentV2FeatureFlag>() {
             return;

@@ -1,19 +1,21 @@
 use crate::agent_connection_store::AgentConnectionStore;
 use crate::thread_metadata_store::{ThreadMetadata, ThreadMetadataStore};
 use crate::{Agent, RemoveSelectedThread};
+use acp_thread::AgentSessionListRequest;
 use agent::ThreadStore;
 use agent_client_protocol as acp;
 use agent_settings::AgentSettings;
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, TimeDelta, Utc};
 use editor::Editor;
 use fs::Fs;
+use futures::FutureExt as _;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ListState, Render,
     SharedString, Subscription, Task, WeakEntity, Window, list, prelude::*, px,
 };
 use itertools::Itertools as _;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
-use project::{AgentId, AgentServerStore};
+use project::{AgentId, AgentServerStore, Project};
 use settings::Settings as _;
 use std::collections::HashSet;
 use theme::ActiveTheme;
@@ -21,6 +23,7 @@ use ui::ThreadItem;
 use ui::{
     Divider, KeyBinding, Tooltip, WithScrollbar, prelude::*, utils::platform_title_bar_height,
 };
+use util::ResultExt;
 use zed_actions::agents_sidebar::FocusSidebarFilter;
 use zed_actions::editor::{MoveDown, MoveUp};
 
@@ -672,6 +675,74 @@ impl Render for ThreadsArchiveView {
             .child(self.render_header(window, cx))
             .child(content)
     }
+}
+
+fn import_threads(
+    agent_ids: Vec<AgentId>,
+    existing_sessions: HashSet<acp::SessionId>,
+    stores: Vec<Entity<AgentConnectionStore>>,
+    cx: &mut App,
+) -> Task<anyhow::Result<()>> {
+    let mut wait_for_connection_tasks = Vec::new();
+
+    for store in stores {
+        for agent_id in agent_ids.clone() {
+            let agent = Agent::from(agent_id.clone());
+            let server = agent.server(<dyn Fs>::global(cx), ThreadStore::global(cx));
+            let entry = store.update(cx, |store, cx| store.request_connection(agent, server, cx));
+            wait_for_connection_tasks
+                .push(entry.read(cx).wait_for_connection().map(|s| (agent_id, s)));
+        }
+    }
+
+    let mut session_list_tasks = Vec::new();
+    cx.spawn(async move |cx| {
+        let results = futures::future::join_all(wait_for_connection_tasks).await;
+        for (agent, result) in results {
+            let Some(state) = result.log_err() else {
+                continue;
+            };
+            let Some(list) = cx.update(|cx| state.connection.session_list(cx)) else {
+                continue;
+            };
+            let task = cx.update(|cx| {
+                list.list_sessions(AgentSessionListRequest::default(), cx)
+                    .map(|r| (agent, r))
+            });
+            session_list_tasks.push(task);
+        }
+
+        let mut to_insert = Vec::new();
+        let results = futures::future::join_all(session_list_tasks).await;
+        for (agent_id, result) in results {
+            let Some(response) = result.log_err() else {
+                continue;
+            };
+            to_insert.extend(response.sessions.into_iter().filter_map(|s| {
+                if existing_sessions.contains(&s.session_id) {
+                    return None;
+                }
+                let folder_paths = s.work_dirs?;
+                Some(ThreadMetadata {
+                    session_id: s.session_id,
+                    agent_id: agent_id.clone(),
+                    title: s
+                        .title
+                        .unwrap_or_else(|| crate::DEFAULT_THREAD_TITLE.into()),
+                    updated_at: s.updated_at.unwrap_or_else(|| Utc::now()),
+                    created_at: s.created_at,
+                    folder_paths,
+                    archived: true,
+                })
+            }));
+        }
+
+        log::info!("Importing {} threads into archive", to_insert.len());
+        cx.update(|cx| {
+            ThreadMetadataStore::global(cx).update(cx, |store, cx| store.save_all(to_insert, cx))
+        });
+        Ok(())
+    })
 }
 
 #[cfg(test)]
