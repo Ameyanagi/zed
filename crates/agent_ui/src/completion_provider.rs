@@ -2148,7 +2148,7 @@ fn build_code_label_for_path(
         .theme()
         .syntax()
         .highlight_id("variable")
-        .map(HighlightId);
+        .map(HighlightId::new);
     let mut label = CodeLabelBuilder::default();
 
     label.push_str(file, None);

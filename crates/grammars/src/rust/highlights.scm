@@ -8,7 +8,7 @@
 
 (primitive_type) @type.builtin
 
-(self) @variable.special
+(self) @variable.special @nones
 
 (field_identifier) @property
 
