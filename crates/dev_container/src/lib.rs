@@ -53,7 +53,7 @@ mod oci;
 use devcontainer_api::read_default_devcontainer_configuration;
 
 use crate::devcontainer_api::DevContainerError;
-use crate::devcontainer_api::apply_dev_container_template_v2;
+use crate::devcontainer_api::apply_devcontainer_template;
 use crate::oci::get_deserializable_oci_blob;
 use crate::oci::get_latest_oci_manifest;
 use crate::oci::get_oci_token;
@@ -1538,7 +1538,7 @@ fn dispatch_apply_templates(
                 workspace.project().read(cx).worktree_for_id(tree_id, cx)
             });
 
-            let files = match apply_dev_container_template_v2(
+            let files = match apply_devcontainer_template(
                 worktree.unwrap(),
                 &template_entry.template,
                 &template_entry.options_selected,

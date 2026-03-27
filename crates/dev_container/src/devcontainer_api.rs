@@ -60,7 +60,7 @@ pub(crate) struct DevContainerUp {
 }
 
 #[derive(Debug)]
-pub(crate) struct DevContainerApplyV2 {
+pub(crate) struct DevContainerApply {
     pub(crate) project_files: Vec<Arc<RelPath>>,
 }
 
@@ -127,37 +127,6 @@ pub(crate) async fn read_default_devcontainer_configuration(
             DevContainerError::DevContainerNotFound
         })
 }
-
-// pub(crate) async fn apply_dev_container_template(
-//     template: &DevContainerTemplate,
-//     options_selected: &HashMap<String, String>,
-//     features_selected: &HashSet<DevContainerFeature>,
-//     cx: &mut AsyncWindowContext,
-//     node_runtime: &NodeRuntime,
-// ) -> Result<DevContainerApply, DevContainerError> {
-//     let (path_to_devcontainer_cli, found_in_path) = ensure_devcontainer_cli(&node_runtime).await?;
-
-//     let Some(directory) = project_directory(cx) else {
-//         return Err(DevContainerError::NotInValidProject);
-//     };
-
-//     devcontainer_template_apply(
-//         template,
-//         options_selected,
-//         features_selected,
-//         &path_to_devcontainer_cli,
-//         found_in_path,
-//         node_runtime,
-//         &directory,
-//         false, // devcontainer template apply does not use --docker-path option
-//     )
-//     .await
-// }
-
-// fn use_podman(cx: &mut AsyncWindowContext) -> bool {
-//     cx.update(|_, cx| DevContainerSettings::get_global(cx).use_podman)
-//         .unwrap_or(false)
-// }
 
 /// Finds all available devcontainer configurations in the project.
 ///
@@ -335,14 +304,14 @@ async fn check_for_docker(use_podman: bool) -> Result<(), DevContainerError> {
     }
 }
 
-pub(crate) async fn apply_dev_container_template_v2(
+pub(crate) async fn apply_devcontainer_template(
     worktree: Entity<Worktree>,
     template: &DevContainerTemplate,
     template_options: &HashMap<String, String>,
     features_selected: &HashSet<DevContainerFeature>,
     context: &DevContainerContext,
     cx: &mut AsyncWindowContext,
-) -> Result<DevContainerApplyV2, DevContainerError> {
+) -> Result<DevContainerApply, DevContainerError> {
     let token = get_oci_token(
         ghcr_registry(),
         devcontainer_templates_repository(),
@@ -441,14 +410,9 @@ pub(crate) async fn apply_dev_container_template_v2(
         project_files.push(rel_path);
     }
 
-    dbg!(&downloaded_devcontainer_folder);
-
-    Ok(DevContainerApplyV2 { project_files })
+    Ok(DevContainerApply { project_files })
 }
 
-// To improve:
-// - Unify the indentation
-// - remove/replace the commented-out features block that pre-exists
 fn insert_features_into_devcontainer_json(
     content: &str,
     features: &HashSet<DevContainerFeature>,
@@ -457,7 +421,6 @@ fn insert_features_into_devcontainer_json(
         return content.to_string();
     }
 
-    // Build the features object: { "ghcr.io/devcontainers/features/node:1": {} }
     let features_value: serde_json::Value = features
         .iter()
         .map(|f| {

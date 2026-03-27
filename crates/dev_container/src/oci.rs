@@ -116,7 +116,6 @@ pub(crate) async fn download_oci_tarball(
 
     let mut response = client.send(request).await.map_err(|e| {
         log::error!("Failed to download feature blob: {e}");
-        dbg!(&e);
         DevContainerError::ResourceFetchFailed
     })?;
     let status = response.status();
@@ -137,7 +136,6 @@ pub(crate) async fn download_oci_tarball(
     let body: Pin<&mut (dyn AsyncRead + Send)> = body;
     let archive = async_tar::Archive::new(body);
     fs.extract_tar_file(dest_dir, archive).await.map_err(|e| {
-        dbg!(&e);
         log::error!("Failed to extract feature tarball: {e}");
         DevContainerError::FilesystemError
     })?;

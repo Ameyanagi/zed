@@ -354,10 +354,6 @@ where
     }
 }
 
-// E.g. it might be /Source/myproject:workspaces/myproject
-// But it might also be Source/:workspaces/
-// In the latter case, we want to found that mount destination (e.g. workspaces/), and fill in the rest of the path to the workspace (so that it's workspaces/myproject)
-// TODO test more
 pub(crate) fn get_remote_dir_from_config(
     config: &DockerInspect,
     local_dir: String,
@@ -370,10 +366,8 @@ pub(crate) fn get_remote_dir_from_config(
     };
 
     for mount in mounts {
-        dbg!(&mount);
         // Sometimes docker will mount the local filesystem on host_mnt for system isolation
         let mount_source = PathBuf::from(&mount.source.trim_start_matches("/host_mnt"));
-        // if mount source is an ancestor of local_path
         if let Ok(relative_path_to_project) = local_path.strip_prefix(&mount_source) {
             let remote_dir = format!(
                 "{}/{}",
