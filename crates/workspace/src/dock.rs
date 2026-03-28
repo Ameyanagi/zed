@@ -293,8 +293,18 @@ pub struct PanelSizeState {
     pub size: Option<Pixels>,
     #[serde(default)]
     pub flexible_size_ratio: Option<f32>,
-    #[serde(default)]
-    pub flexible: Option<bool>,
+}
+
+impl PanelSizeState {
+    pub fn is_flexible(&self, default: bool) -> bool {
+        if self.flexible_size_ratio.is_some() {
+            true
+        } else if self.size.is_some() {
+            false
+        } else {
+            default
+        }
+    }
 }
 
 struct PanelEntry {
@@ -859,17 +869,13 @@ impl Dock {
         };
         let currently_flexible = entry
             .size_state
-            .flexible
-            .unwrap_or_else(|| entry.panel.supports_flexible_size(window, cx));
-        entry.size_state.flexible = Some(!currently_flexible);
+            .is_flexible(entry.panel.supports_flexible_size(window, cx));
         if currently_flexible {
-            if let Some(size) = current_size {
-                entry.size_state.size = Some(size);
-            }
+            entry.size_state.size = current_size;
+            entry.size_state.flexible_size_ratio = None;
         } else {
-            if let Some(ratio) = current_ratio {
-                entry.size_state.flexible_size_ratio = Some(ratio);
-            }
+            entry.size_state.flexible_size_ratio = current_ratio;
+            entry.size_state.size = None;
         }
         let panel_key = entry.panel.panel_key();
         let size_state = entry.size_state;
@@ -899,8 +905,7 @@ impl Dock {
 
             let use_flexible = entry
                 .size_state
-                .flexible
-                .unwrap_or_else(|| entry.panel.supports_flexible_size(window, cx));
+                .is_flexible(entry.panel.supports_flexible_size(window, cx));
             if use_flexible {
                 entry.size_state.flexible_size_ratio = ratio;
             } else {
@@ -935,8 +940,7 @@ impl Dock {
             let size = size.map(|size| size.max(RESIZE_HANDLE_SIZE).round());
             let use_flexible = entry
                 .size_state
-                .flexible
-                .unwrap_or_else(|| entry.panel.supports_flexible_size(window, cx));
+                .is_flexible(entry.panel.supports_flexible_size(window, cx));
             if use_flexible {
                 entry.size_state.flexible_size_ratio = ratio;
             } else {
@@ -980,8 +984,7 @@ impl Dock {
         for entry in &mut self.panel_entries {
             let use_flexible = entry
                 .size_state
-                .flexible
-                .unwrap_or_else(|| entry.panel.supports_flexible_size(window, cx));
+                .is_flexible(entry.panel.supports_flexible_size(window, cx));
             if use_flexible {
                 continue;
             }
@@ -1164,8 +1167,8 @@ impl Render for PanelButtons {
                 let supports_flexible = panel.supports_flexible_size(window, cx);
                 let currently_flexible = dock
                     .stored_panel_size_state(panel.as_ref())
-                    .and_then(|s| s.flexible)
-                    .unwrap_or(supports_flexible);
+                    .unwrap_or_default()
+                    .is_flexible(supports_flexible);
                 let dock_for_menu = dock_entity.clone();
                 let workspace_for_menu = workspace.clone();
 
@@ -1410,7 +1413,6 @@ pub mod test {
             PanelSizeState {
                 size: None,
                 flexible_size_ratio: None,
-                flexible: None,
             }
         }
 
