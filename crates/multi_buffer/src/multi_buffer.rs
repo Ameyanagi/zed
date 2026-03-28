@@ -569,7 +569,7 @@ impl sum_tree::ContextLessSummary for DiffStateSummary {
     }
 
     fn add_summary(&mut self, other: &Self) {
-        self.max_buffer_id = other.max_buffer_id.or(self.max_buffer_id);
+        self.max_buffer_id = std::cmp::max(self.max_buffer_id, other.max_buffer_id);
         self.added_rows += other.added_rows;
         self.removed_rows += other.removed_rows;
     }
@@ -602,7 +602,7 @@ impl<'a> Dimension<'a, DiffStateSummary> for Option<BufferId> {
     }
 
     fn add_summary(&mut self, summary: &DiffStateSummary, _cx: ()) {
-        *self = summary.max_buffer_id;
+        *self = std::cmp::max(*self, summary.max_buffer_id);
     }
 }
 
